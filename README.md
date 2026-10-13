@@ -18,7 +18,7 @@ The local Hand Landmarker model is included. Before dev/build, a script verifies
 
 ## Use the application
 
-1. The demo starts without permission. Watch its 32-second normal → bowtie → hand interchange → normal/return cycle. Every mode uses the same simulated pose and original illustration.
+1. The demo starts without permission. Watch its 32-second normal → bowtie → hand interchange → normal/return cycle. Every mode uses the same simulated pose and personalized study-space illustration.
 2. Select **Graphite**, **Solarize** or **Motion Glitch**. For Graphite, open the sliders icon beside the selector to see three independent sliders, each snapping to **0%, 25%, 50%, 75%, 100%**. The settings panel overlays the preview; close it with its icon, outside click or Escape. Solarize and Motion Glitch hide the icon and add no controls. Switching modes retains your Graphite choices.
 3. Graphite defaults are **50% Edge Sensitivity, 75% Line Intensity, 50% Shading Intensity**. Levels are calibrated rather than literal weights; even all-zero displayed levels retain delicate contours and tone. The [technical explanation](TECHNICAL_EXPLANATION.md) gives the exact mapping.
 4. Solarize folds luminance into charcoal, scarlet/crimson, cyan/teal and neutral tones. Bowtie A stays warmer and B cooler through hand interchange.
@@ -28,6 +28,16 @@ The local Hand Landmarker model is included. Before dev/build, a script verifies
 8. The header has the [actual project repository](https://github.com/viridiphile/finger-frame) and **About**. About contains five expandable technical explanations, technologies and attribution. Escape or Close dismisses it and restores focus; the background is inert while it is open. Telemetry shows hand count, FPS and **Quad / Bowtie / Lost** geometry.
 
 Denied permission, absent/busy cameras, insecure pages and interrupted startup produce recovery guidance. On macOS, also check browser permission in System Settings → Privacy & Security → Camera. Stop/restart retries a failed tracker; the demo remains available.
+
+## Personalized demo scene
+
+The demo is an original Canvas illustration based on the supplied desk and apartment-view photos: a honey-toned wooden desk, central dark laptop, long bar lamp with a pen cup, and a grouped collection of three Hirono-inspired figures. The cone hat, striped top-hat outfit and pale candle figure retain distinctive details from the reference collection. A casement window frames steep green mountain layers between simplified apartment buildings.
+
+The composition also includes a small succulent, a folded white flower-shaped lamp, a notebook fully in front of the laptop, and an original green botanical sun-shadow wall print inspired by the later art reference. Warm off-white surfaces and muted green accents keep the effects readable. Dense forest/balcony detail and collectible costumes are simplified into clean silhouettes; loose cables, packaging and screenshot overlays are not reproduced.
+
+`src/demoScene.js` draws the scenery once per source context/size and caches the resulting Canvas. Each subsequent frame uses one image draw for the background. Scenery stays still, including the subtle lamp light; the existing hands, motion, bowtie/interchange sequence and 32-second timing animate unchanged. There are no scene image downloads, new dependencies or changes to webcam, capture or effect algorithms.
+
+The scene work is isolated on `feature/personalized-demo-scene`. Modified files: `src/demo.js`, new `src/demoScene.js`, new `tests/demoScene.browser.spec.js`, and the three usage/technical/manual-testing documents. Browser checks save the original scene and twelve normal/bowtie/interchange effect previews in ignored `test-results/personalized-demo/` for visual review.
 
 ## Checks and production preview
 
@@ -40,11 +50,11 @@ npm run preview
 
 - Node checks: **57 tests passed**, including all **125** Graphite combinations, motion features, palette mapping, geometry stability and countdown/cancellation/encoding recovery.
 - Build: **successful**, with local model/WASM assets packaged in `dist/`.
-- Chrome checks: **19 tests passed**, including all modes, discrete independent controls/settings retention, PNG output, anatomical lobe treatment, masking, native crop/buffer reuse, responsive layout, the demo cycle, permission failures/cancellation, mirroring and model inference on synthetic video. New workspace checks cover four desktop and four small viewports, anchored popover dismissal, native modal focus/inertness, all five accordions, countdown timing, exact final-canvas PNG bytes, cancellation during encoding, capture recovery and webcam-mode capture.
+- Chrome checks: **22 tests passed**, including all modes, discrete independent controls/settings retention, PNG output, anatomical lobe treatment, masking, native crop/buffer reuse, responsive layout, the demo cycle, permission failures/cancellation, mirroring and model inference on synthetic video. New workspace checks cover four desktop and four small viewports, anchored popover dismissal, native modal focus/inertness, all five accordions, countdown timing, exact final-canvas PNG bytes, cancellation during encoding, capture recovery and webcam-mode capture. Three scene checks add opaque/scaled artwork and cache reuse, all effects through normal/bowtie/interchange/reversed poses, and production demo performance without a webcam or external assets.
 
 Browser checks build first and start/stop their own dev and production servers on ports **4173/4174**; keep both free. On this Mac they use installed Google Chrome. Elsewhere run `npx playwright install chromium` first, or set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`. Test captures are in ignored `test-results/`.
 
-`npm run preview` serves the current production build. Open its printed Local URL; rebuild after source changes. The headless production Graphite demo reported 30fps after settling, which is a demo observation rather than a physical-camera benchmark.
+`npm run preview` serves the current production build. Open its printed Local URL; rebuild after source changes. The personalized production demo reported **30, 30, 30fps** in each of Graphite, Solarize and Motion Glitch after settling, matching the earlier 30fps demo observation. These are headless demo measurements rather than physical-camera or cross-browser benchmarks.
 
 ## Verification limits
 
@@ -86,4 +96,4 @@ The normal desktop workspace fits 1280×720, 1366×768, 1440×900 and 1920×1080
 | `tests/graphiteControls.test.js`, `tests/solarize.test.js`, `tests/frameMotion.test.js`, `tests/motionGlitch.test.js`, `tests/v3.browser.spec.js` (new) | Mapping, 125 combinations, palette identity, gesture response and compositing |
 | `README.md`, `TECHNICAL_EXPLANATION.md`, `MANUAL_TESTING.md`, `V3_SPECIFICATION.md` | Current V3 algorithms, corrected requirements and testing guidance |
 
-`node_modules/`, `dist/`, generated WASM and test output remain excluded from Git. The corrected specification incorporates the user's three-slider amendment throughout Sections 3, 7, 8, 9 and 11 and related references. This frontend iteration belongs to `feature/compact-workspace-ui`; merge review remains with the user. No merge or v1.3 release tag is part of this submission.
+`node_modules/`, `dist/`, generated WASM and test output remain excluded from Git. The corrected specification incorporates the user's three-slider amendment throughout Sections 3, 7, 8, 9 and 11 and related references. The compact workspace was reviewed/merged separately. This scene redesign belongs to `feature/personalized-demo-scene`; merge review remains with the user. No merge or release tag is part of this submission.

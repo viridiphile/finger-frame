@@ -1,5 +1,15 @@
 # FingerFrame — technical explanation
 
+## Personalized study-space demo
+
+`demo.js` keeps the existing `drawDemoScene(ctx, width, height, timestamp)` interface and delegates background artwork to `demoScene.js`. The simulated hands, fingertips, phase labels, 32-second cycle and hand silhouettes remain identical to the merged workspace version. Main-loop, webcam, screenshot, tracking, geometry, masking and effect modules are unchanged.
+
+The artwork uses Canvas paths, rounded shapes, ellipses, restrained gradients and a few perspective cues. The user's photos inform the long lamp/pen-cup base, dark laptop, cone-hat/striped-outfit/candle collectibles, white sculptural flower lamp, honey-colored desk, steep layered ridges and apartment-window framing. Three figurines form a small collection; a succulent and botanical window-shadow print balance the left side. The notebook sits forward of the laptop deck. Details are stylized and rearranged for the landscape Canvas rather than reproducing the photographs literally. The paper/notes screen contains no real application content; no photographic or product assets are embedded.
+
+A `WeakMap` associates each source context with one cached artwork Canvas at its current dimensions. The first call, or a size change, rasterizes the illustration in 960×600 design coordinates scaled to the requested size. Subsequent calls draw that cached opaque image; old sizes are replaced, and discarded contexts can be garbage collected. Lamp glow and scenery remain static. Existing simulated hand gestures alone drive movement and Motion Glitch, keeping the effect as the main attraction.
+
+Three new browser tests verify opacity at full/half size, reuse across timestamps and size changes, clipping and toggle restoration on the actual scene in all three effects through four poses, and camera-free production throughput. Twelve effect previews and two source previews are saved under ignored `test-results/personalized-demo/`. Settled FPS samples were 30/30/30 for each effect on this Mac's headless Chrome, consistent with the previous 30fps demo result. This is not a physical-camera or mobile-device benchmark. Visual review compared the original scene and filtered output against the supplied references; user review of composition and device/browser performance remains recommended.
+
 ## Compact workspace frontend
 
 `workspaceView.js` owns static presentation and a single repository URL confirmed against Git origin. `workspaceUI.js` handles the Graphite overlay, native modal dialog and five accessible accordion buttons. The calibrated `GraphiteControls` object and processors are reused; the popover changes visibility only. It closes on its button, outside pointer/focus, Escape, effect switching or viewport resizing. On opening it chooses available space above/below the button and scrolls internally when needed.

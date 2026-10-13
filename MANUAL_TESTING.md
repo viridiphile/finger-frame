@@ -1,9 +1,11 @@
-# Compact workspace and V3 manual testing checklist
+# Personalized demo, compact workspace and V3 manual testing checklist
 
 Run `npm ci` and `npm run dev`, open Vite's Local URL in Chrome, and keep the terminal running. Also run `npm run build` / `npm run preview` before presenting.
 
 Checkboxes are for the user’s manual review; physical-camera visual verification requires a person and webcam. Automated results and their limits are in the README.
 
+- [ ] **Personalized artwork:** compare the demo to the supplied photos: wood desk, central laptop, attached bar lamp/pen cup, three grouped collectible figures, mountain/apartment window and folded flower lamp. Check the succulent and green wall print balance the left side, and the notebook stays entirely forward of the laptop. Review toy/plant silhouettes on laptop and mobile displays; the scene is deliberately stylized.
+- [ ] **Scene/effect readability:** watch a full 32-second cycle in Graphite, Solarize and Motion Glitch. Check both bowtie lobes, hand interchange, original-hand restoration and effect toggling against the new background. Take a countdown PNG in each effect. Check scene detail does not distract from the frame and measure throughput on your presentation device, including Safari/Firefox if used.
 - [ ] **Workspace layout:** preview dominates a standard laptop window without page scrolling; camera aspect ratio is preserved. Test mobile portrait/landscape and 200% browser zoom. Scroll when needed and reach every source, effect and capture control. Check stopped, loading, live, demo and permission-error states, plus hand/FPS/Quad/Bowtie/Lost telemetry.
 - [ ] **Settings overlay:** open/close with the sliders icon, outside click and Escape. Tab through all three ranges. Open near the top/bottom after scrolling on a narrow screen; the panel stays within the viewport and scrolls internally. Opening it must not change page height or restart the camera.
 - [ ] **About/navigation:** open About, expand/collapse each of the five sections, and verify both GitHub links open the actual project in a new tab. Check Tab/Shift+Tab remain inside the modal, background controls cannot be used, Escape/Close restores focus, and long content scrolls while the close button stays reachable. Confirm screen-reader labels and countdown announcements.

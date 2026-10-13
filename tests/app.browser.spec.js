@@ -116,10 +116,10 @@ test('a bowtie filters both lobes once, preserving the unframed side regions', a
 
 test('sketch adjustments work and ordinary frames retain native processing detail', async ({ page }) => {
   await page.goto('/');
-  await page.locator('#sketch-adjustments summary').click();
+  await expect(page.locator('#sketch-adjustments')).toHaveAttribute('open', '');
   for (const name of ['sensitivity', 'lineIntensity', 'shadingIntensity']) {
-    await page.locator(`#${name}`).fill('40');
-    await expect(page.locator(`#${name}-value`)).toHaveText('40%');
+    await page.locator(`#${name}`).fill('25');
+    await expect(page.locator(`#${name}-value`)).toHaveText('25%');
   }
   const result = await page.evaluate(async () => {
     const { PencilSketch } = await import('/src/effects.js');
@@ -179,12 +179,20 @@ test('the live demo shows both bowtie lobes, hand interchange, and the normal re
   await expect(page.locator('#stage-tag')).toContainText('BOWTIE · TWO FILTERED LOBES', { timeout:15000 });
   await expect(page.locator('#tracking-label')).toHaveText('Simulated bowtie · both lobes');
   await page.screenshot({ path:'test-results/demo-bowtie.png', fullPage:true });
+  await page.locator('[data-effect="solarize"]').click();
+  await expect(page.locator('#stage-tag')).toContainText('SOLARIZE');
+  await page.screenshot({path:'test-results/v3-solarize-bowtie.png',fullPage:true});
+  await page.locator('[data-effect="motion-glitch"]').click();
+  await expect(page.locator('#stage-tag')).toContainText('MOTION GLITCH');
+  await page.waitForTimeout(500);
+  await page.screenshot({path:'test-results/v3-glitch-bowtie.png',fullPage:true});
+  await page.locator('[data-effect="graphite"]').click();
   await expect(page.locator('#stage-tag')).toContainText('HAND INTERCHANGE', { timeout:10000 });
   await expect(page.locator('#stage-tag')).toContainText('NORMAL FRAME · A IS NOW ON THE RIGHT', { timeout:15000 });
   await expect(page.locator('#tracking-label')).toHaveText('Simulated frame');
   await page.screenshot({ path:'test-results/demo-interchanged.png', fullPage:true });
   await page.locator('#demo-btn').click();
-  await expect(page.locator('#stage-tag')).toHaveText('DEMO / NORMAL FRAME');
+  await expect(page.locator('#stage-tag')).toHaveText('DEMO / GRAPHITE / NORMAL FRAME');
   await expect(page.locator('#error-message')).toBeHidden();
 });
 

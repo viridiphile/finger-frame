@@ -90,18 +90,53 @@ test('segment intersection distinguishes crossing, endpoint touch, overlap, and 
   assert.equal(segmentIntersection(point(0, 0), point(1e6, 1), point(0, 1), point(1e6, 2.000000001)), null);
 });
 
-test('duplicates, collinearity, narrow/one-lobe frames and offscreen tips are rejected', () => {
-  const tinyLobe = bowtie();
-  tinyLobe[1].y = tinyLobe[3].y = 435;
-  const cases = [null, rectangle().slice(0, 3), tinyLobe,
+test('true collapse, invalid identities and offscreen tips are rejected', () => {
+  const cases = [null, rectangle().slice(0, 3),
     rectangle().map((p) => ({ ...p, y: 300 })),
-    rectangle().map((p, i) => i === 0 ? { ...p, x: 280, y: 160 } : p),
-    rectangle().map((p) => ({ ...p, x: 480 + (p.x - 480) * 0.02 })),
+    rectangle().map((p) => ({ ...p, x: 480 + (p.x - 480) * 0.000002 })),
     rectangle().map((p, i) => i === 0 ? { ...p, x: -2 } : p),
     rectangle().map((p, i) => i === 0 ? { ...p, x: Infinity } : p),
   ];
   for (const points of cases) assert.equal(validateFrame(points, width, height).valid, false);
   assert.equal(anatomicalPolygon(rectangle().map((p) => ({ ...p, hand: 0 }))), null);
+});
+
+test('nearby fingertips and narrow meaningful regions do not disappear prematurely', () => {
+  const close = rectangle().map((p) => ({ ...p, x: 480 + (p.x - 480) * 0.02 }));
+  assert.equal(validateFrame(close,width,height).valid,true);
+  const touching = rectangle(); touching[0] = { ...touching[0], x:280, y:160 };
+  const result = validateFrame(touching,width,height);
+  assert.equal(result.valid,true);
+  assert.ok(result.regions.some((region) => polygonArea(region)>1000));
+});
+
+test('a tiny bowtie lobe is omitted without disabling the other anatomical lobe', () => {
+  const small = bowtie('one-hand'); small[0].y = 300.1; small[1].y = 299.9;
+  const result = validateFrame(small,width,height);
+  assert.equal(result.valid,true);
+  assert.equal(result.kind,'bowtie');
+  assert.equal(result.regions.length,1);
+  assert.equal(result.geometryState,'near-degenerate');
+  assert.deepEqual(result.regionIds,['B']);
+});
+
+test('anatomical lobe labels stay attached to vertices during screen interchange', () => {
+  for(const points of [bowtie(),bowtie('one-hand'),bowtie().map((p)=>({...p,x:width-p.x}))]) {
+    const result=validateFrame(points,width,height);
+    assert.deepEqual(result.regionIds,['A','B']);
+    assert.ok(result.regions[0].some((p)=>p.hand===0 && p.finger===1));
+    assert.ok(result.regions[1].some((p)=>p.hand===1 && p.finger===0));
+  }
+});
+
+test('geometry hysteresis retains marginal valid shapes but never a true collapse', () => {
+  const narrow = (separation) => rectangle().map((p)=>({...p,x:480+(p.x<480?-separation/2:separation/2)}));
+  assert.equal(validateFrame(narrow(0.09),width,height).valid,false);
+  assert.equal(validateFrame(narrow(0.09),width,height,{retain:true}).valid,true);
+  const frame = new FrameStabilizer(); frame.update(rectangle(),0,width,height);
+  for(let t=50;t<=350;t+=50) frame.update(rectangle().map((p)=>({...p,y:300})),t,width,height);
+  assert.equal(frame.snapshot(350).polygon,null);
+  assert.equal(frame.update(rectangle(),400,width,height).kind,'quadrilateral');
 });
 
 test('short loss predicts/holds, then fades and expires using real observation time', () => {

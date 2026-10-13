@@ -45,44 +45,57 @@ export function anatomicalPolygon(points) {
   return polygon.every(Boolean) ? polygon : null;
 }
 
-export function validateFrame(points, width, height) {
-  const invalid = (reason) => ({ valid: false, reason, polygon: null, regions: [], kind: null, intersection: null });
-  if (width <= 0 || height <= 0) return invalid('Show both hands');
+export function validateFrame(points, width, height, { retain = false, activeRegionIds = [] } = {}) {
+  const invalid = (reason, geometryState = 'degenerate') => ({
+    valid: false, reason, polygon: null, regions: [], regionIds: [], kind: null, intersection: null, geometryState,
+  });
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return invalid('Show both hands', 'lost');
   const polygon = anatomicalPolygon(points);
-  if (!polygon) return invalid('Show both hands');
+  if (!polygon) return invalid('Show both hands', 'lost');
   if (!polygon.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)
-    && p.x >= 0 && p.x <= width && p.y >= 0 && p.y <= height)) return invalid('Keep all four fingertips in view');
-  const minimumDistance = Math.min(width, height) * 0.02;
-  for (let i = 0; i < 4; i++) {
-    for (let j = i + 1; j < 4; j++) {
-      if (distance(polygon[i], polygon[j]) < minimumDistance) return invalid('Spread your fingertips apart');
-    }
-  }
+    && p.x >= 0 && p.x <= width && p.y >= 0 && p.y <= height)) return invalid('Keep all four fingertips in view', 'lost');
+  const center = polygon.reduce((sum, p) => ({ x: sum.x + p.x / 4, y: sum.y + p.y / 4 }), { x: 0, y: 0 });
+  const spreadSquared = polygon.reduce((sum, p) => sum + distance(p, center) ** 2 / 4, 0);
+  // Local spread, not full-screen area or every pair's separation, determines
+  // whether there are meaningful pixels. Nothing is expanded artificially.
+  const baseArea = Math.max(1.5, spreadSquared * 0.0015);
+  const pixelTolerance = Math.max(1e-4, Math.hypot(width, height) * 1e-7);
   const [a, b, c, d] = polygon;
   const first = segmentIntersection(a, b, c, d);
   const second = segmentIntersection(b, c, d, a);
-  if ([first, second].some((hit) => hit && hit.kind !== 'crossing')) return invalid('Open the frame a little wider');
-  if (first && second) return invalid('Open the frame a little wider');
+  if ([first, second].some((hit) => hit?.kind === 'overlap')) return invalid('Open the frame a little wider');
+  if (first && second && distance(first, second) > pixelTolerance) return invalid('Open the frame a little wider');
   const hit = first || second;
-  let regions;
   if (hit) {
     const intersection = { x: hit.x, y: hit.y };
-    regions = first ? [[a, intersection, d], [b, c, intersection]] : [[a, b, intersection], [c, d, intersection]];
-    const areas = regions.map(polygonArea);
-    if (Math.min(...areas) < width * height * 0.001 || areas[0] + areas[1] < width * height * 0.008) {
-      return invalid('Open both bowtie lobes a little wider');
+    const triangles = first ? [[a, intersection, d], [b, c, intersection]] : [[a, b, intersection], [c, d, intersection]];
+    // A always contains A.index, B always contains B.thumb. These anatomical
+    // labels survive rotation, reversed winding and screen-position exchange.
+    const ids = ['A', 'B'];
+    const regions = [], regionIds = [];
+    let area = 0;
+    for (let i = 0; i < 2; i++) {
+      const lobeArea = polygonArea(triangles[i]);
+      const threshold = baseArea * (activeRegionIds.includes(ids[i]) ? 0.65 : 1.25);
+      if (lobeArea >= threshold) {
+        regions.push(triangles[i]); regionIds.push(ids[i]); area += lobeArea;
+      }
     }
-    return { valid: true, reason: 'Bowtie tracked', polygon, regions, kind: 'bowtie', intersection, area: areas[0] + areas[1] };
+    if (!regions.length) return invalid('Open the frame a little wider');
+    return {
+      valid: true, reason: 'Bowtie tracked', polygon, regions, regionIds, kind: 'bowtie', intersection, area,
+      geometryState: regions.length < 2 || hit.kind === 'touch' || Math.min(...triangles.map(polygonArea)) < baseArea * 8 ? 'near-degenerate' : 'stable',
+    };
   }
   const area = polygonArea(polygon);
-  if (area < width * height * 0.008) return invalid('Make a larger frame');
-  for (let i = 0; i < 4; i++) {
-    const previous = polygon[(i + 3) % 4], point = polygon[i], next = polygon[(i + 1) % 4];
-    const sine = Math.abs(crossVector(subtract(previous, point), subtract(next, point)))
-      / (distance(previous, point) * distance(next, point));
-    if (sine < 0.015) return invalid('Open the frame a little wider');
-  }
-  return { valid: true, reason: 'Frame tracked', polygon, regions: [polygon], kind: 'quadrilateral', intersection: null, area };
+  if (area < baseArea * (retain ? 0.65 : 1.25)) return invalid('Make a larger frame');
+  let minimumDistance = Infinity;
+  for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) minimumDistance = Math.min(minimumDistance, distance(polygon[i], polygon[j]));
+  return {
+    valid: true, reason: 'Frame tracked', polygon, regions: [polygon], regionIds: ['frame'],
+    kind: 'quadrilateral', intersection: null, area,
+    geometryState: area < baseArea * 8 || minimumDistance < Math.sqrt(spreadSquared) * 0.025 ? 'near-degenerate' : 'stable',
+  };
 }
 
 export class FrameStabilizer {
@@ -98,14 +111,24 @@ export class FrameStabilizer {
     this.acquiredAt = null;
     this.reason = 'Show both hands';
     this.measurementValid = false;
+    this.collapsedAt = null;
+    this.currentGeometryState = 'lost';
   }
 
   // Coordinates have already been smoothed/predicted by HandIdentityTracker.
   // observedAt is the older hand's real observation timestamp: predicting or
   // redrawing a stale pose must not extend its lifetime indefinitely.
   update(points, timestamp, width, height, { observedAt = timestamp } = {}) {
-    const validation = validateFrame(points, width, height);
+    const retaining = this.geometry !== null && timestamp - this.lastValid < this.holdMs + this.fadeMs
+      && (this.collapsedAt === null || timestamp - this.collapsedAt < 80 + this.fadeMs);
+    const validation = validateFrame(points, width, height, {
+      retain: retaining,
+      activeRegionIds: retaining ? this.geometry.regionIds : [],
+    });
     this.measurementValid = validation.valid;
+    this.currentGeometryState = validation.geometryState;
+    if (validation.valid || validation.geometryState === 'lost') this.collapsedAt = null;
+    else if (this.collapsedAt === null) this.collapsedAt = timestamp;
     this.reason = validation.valid && timestamp - observedAt > 150 ? 'Show both hands' : validation.reason;
     if (validation.valid && timestamp - observedAt < this.holdMs + this.fadeMs) {
       if (!this.geometry || timestamp - this.lastValid >= this.holdMs + this.fadeMs) this.acquiredAt = timestamp;
@@ -117,14 +140,17 @@ export class FrameStabilizer {
 
   snapshot(timestamp) {
     const age = Math.max(0, timestamp - this.lastValid);
-    if (!this.geometry || age >= this.holdMs + this.fadeMs) {
-      return { polygon: null, regions: [], opacity: 0, state: 'searching', reason: this.reason, kind: null };
+    // Actual collapse gets a shorter hold than missing detection. Neither
+    // repeated collapsed samples nor predicted points refresh the lifetime.
+    const collapseAge = this.collapsedAt === null ? 0 : timestamp - this.collapsedAt;
+    if (!this.geometry || age >= this.holdMs + this.fadeMs || collapseAge >= 80 + this.fadeMs) {
+      return { polygon: null, regions: [], regionIds: [], opacity: 0, state: 'searching', reason: this.reason, kind: null, geometryState: this.currentGeometryState };
     }
     const fadeOut = age <= this.holdMs ? 1 : 1 - (age - this.holdMs) / this.fadeMs;
     const fadeIn = Math.min(1, Math.max(0, (timestamp - this.acquiredAt) / 100));
     return {
-      ...this.geometry, reason: this.reason,
-      opacity: Math.min(fadeIn, fadeOut),
+      ...this.geometry, reason: this.reason, geometryState: this.currentGeometryState,
+      opacity: Math.min(fadeIn, fadeOut, collapseAge <= 80 ? 1 : 1 - (collapseAge - 80) / this.fadeMs),
       state: this.measurementValid && age <= 80 ? 'tracked' : age <= 150 && this.measurementValid ? 'predicting' : 'holding',
     };
   }

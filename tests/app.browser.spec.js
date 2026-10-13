@@ -116,7 +116,8 @@ test('a bowtie filters both lobes once, preserving the unframed side regions', a
 
 test('sketch adjustments work and ordinary frames retain native processing detail', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('#sketch-adjustments')).toHaveAttribute('open', '');
+  await page.getByRole('button', { name: 'Graphite settings', exact: true }).click();
+  await expect(page.locator('#sketch-adjustments')).toBeVisible();
   for (const name of ['sensitivity', 'lineIntensity', 'shadingIntensity']) {
     await page.locator(`#${name}`).fill('25');
     await expect(page.locator(`#${name}-value`)).toHaveText('25%');

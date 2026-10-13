@@ -9,59 +9,11 @@ import { GraphiteControls } from './graphiteControls.js';
 import { FrameMotion, ZERO_MOTION } from './frameMotion.js';
 import { EFFECT_LABELS } from './effectPipeline.js';
 
-const icon = (content) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${content}</svg>`;
-const cameraIcon = icon('<rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 10 5-3v10l-5-3"/>');
-const captureIcon = icon('<path d="M8 5 9.5 3h5L16 5h3a2 2 0 0 1 2 2v12H3V7a2 2 0 0 1 2-2Z"/><circle cx="12" cy="12" r="4"/>');
-const frameIcon = icon('<path d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6"/><path d="m9 15 6-6"/>');
+import { workspaceView } from './workspaceView.js';
+import { initializeWorkspaceUI } from './workspaceUI.js';
 
-document.querySelector('#app').innerHTML = `
-  <main class="studio">
-    <header class="header">
-      <a class="brand" href="./" aria-label="FingerFrame home"><span class="brand-mark">${frameIcon}</span>FingerFrame<span class="brand-detail">/ a study in perception</span></a>
-      <span class="privacy"><span class="privacy-dot"></span>Processed on your device</span>
-    </header>
-    <section class="intro" aria-labelledby="title">
-      <div><p class="eyebrow">INTERACTIVE MULTIMEDIA · EXPERIMENT 01</p><h1 id="title">Your hands. A different perspective.</h1>
-      <p class="intro-copy">Make a frame with your thumbs and index fingers. Explore graphite, chromatic tones, and motion.</p></div>
-      <div class="sketch-stamp" aria-hidden="true">four points.<br><span>one little world.</span></div>
-    </section>
-    <section class="workspace" aria-label="Finger frame studio">
-      <div class="stage-toolbar"><span class="stage-title"><span class="status-dot" id="mode-dot"></span><span id="mode-label">Demo scene</span></span><span class="stage-note" id="stage-note">SIMULATED FINGERTIPS</span></div>
-      <div class="stage" id="stage">
-        <canvas id="output-canvas" width="960" height="600" role="img" aria-label="Animated demo with a pencil sketch inside the simulated finger frame"></canvas>
-        <video id="webcam" autoplay playsinline muted hidden aria-hidden="true"></video>
-        <div class="stage-overlay" id="stage-overlay" hidden><span class="overlay-icon">${frameIcon}</span><strong>Ready when you are</strong><p>Start your camera or explore the demo scene.</p></div>
-        <span class="stage-tag" id="stage-tag">DEMO / PENCIL STUDY</span>
-      </div>
-      <div class="effect-selector" role="group" aria-label="Visual effect">
-        <button type="button" data-effect="graphite" aria-pressed="true">Graphite</button>
-        <button type="button" data-effect="solarize" aria-pressed="false">Solarize</button>
-        <button type="button" data-effect="motion-glitch" aria-pressed="false">Motion Glitch</button>
-      </div>
-      <details class="sketch-adjustments" id="sketch-adjustments" open>
-        <summary>Fine-tune the pencil</summary>
-        <div class="adjustment-grid">
-          <label for="sensitivity">Edge Sensitivity <output id="sensitivity-value" for="sensitivity">50%</output><input id="sensitivity" type="range" min="0" max="100" step="25" value="50"><span class="range-levels" aria-hidden="true"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></span></label>
-          <label for="lineIntensity">Line Intensity <output id="lineIntensity-value" for="lineIntensity">75%</output><input id="lineIntensity" type="range" min="0" max="100" step="25" value="75"><span class="range-levels" aria-hidden="true"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></span></label>
-          <label for="shadingIntensity">Shading Intensity <output id="shadingIntensity-value" for="shadingIntensity">50%</output><input id="shadingIntensity" type="range" min="0" max="100" step="25" value="50"><span class="range-levels" aria-hidden="true"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></span></label>
-        </div>
-      </details>
-      <div class="telemetry"><span id="tracking-pill" class="tracking-pill" data-state="tracked"><span></span><span id="tracking-label">Simulated frame</span></span><span class="metrics"><span id="hands-count">4 simulated fingertips</span><span class="metric-divider">/</span><span id="fps">— fps</span></span></div>
-      <div class="controls">
-        <div class="source-controls"><button class="button primary" id="start-btn" type="button">${cameraIcon}<span>Start camera</span></button><button class="button stop-button" id="stop-btn" type="button" disabled><span class="stop-icon" aria-hidden="true"></span>Stop</button><button class="button demo-button" id="demo-btn" type="button" aria-pressed="true">Demo scene</button></div>
-        <div class="effect-controls"><label class="effect-switch" for="effect-toggle"><input type="checkbox" id="effect-toggle" checked><span class="switch-track" aria-hidden="true"></span><span>Effect on</span></label><span class="control-divider"></span><button class="button capture-button" id="capture-btn" type="button">${captureIcon}<span>Capture</span></button></div>
-      </div>
-    </section>
-    <div class="message" id="message" role="status" aria-live="polite">Demo running. The frame gently moves, rotates, and resizes. Start your camera to try it with your hands.</div>
-    <div class="error-message" id="error-message" role="alert" hidden></div>
-    <section class="guide" aria-label="How to use FingerFrame">
-      <div class="guide-item"><span class="step-number">01</span><div><h2>Bring both hands into view</h2><p>Use even lighting and face your palms toward the camera.</p></div></div>
-      <div class="guide-item"><span class="step-number">02</span><div><h2>Make a window</h2><p>Spread each thumb and index finger to form four corners.</p></div></div>
-      <div class="guide-item"><span class="step-number">03</span><div><h2>Move your perspective</h2><p>Rotate, resize, and explore. Capture a moment as a PNG.</p></div></div>
-    </section>
-    <footer><span>A small experiment at the intersection of gesture & image.</span><span>VANILLA JS · MEDIAPIPE · CANVAS</span></footer>
-  </main>
-`;
+document.querySelector('#app').innerHTML = workspaceView;
+const workspaceUI = initializeWorkspaceUI();
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
@@ -69,7 +21,7 @@ const ui = {
   demo: $('#demo-btn'), capture: $('#capture-btn'), effect: $('#effect-toggle'),
   message: $('#message'), error: $('#error-message'), overlay: $('#stage-overlay'),
   mode: $('#mode-label'), note: $('#stage-note'), tag: $('#stage-tag'), dot: $('#mode-dot'),
-  tracking: $('#tracking-label'), pill: $('#tracking-pill'), hands: $('#hands-count'), fps: $('#fps'),
+  tracking: $('#tracking-label'), pill: $('#tracking-pill'), hands: $('#hands-count'), fps: $('#fps'), geometry: $('#geometry'),
 };
 const renderer = new Renderer(ui.canvas);
 const graphiteControls = new GraphiteControls();
@@ -103,12 +55,13 @@ function showError(message) { ui.error.textContent = message; ui.error.hidden = 
 function refreshControls() {
   ui.start.disabled = starting || mode === 'camera';
   ui.start.querySelector('span').textContent = starting ? 'Starting…' : 'Start camera';
-  ui.stop.disabled = !starting && mode !== 'camera';
+  ui.stop.disabled = !starting && mode === 'idle';
   ui.capture.disabled = mode === 'idle';
   ui.demo.setAttribute('aria-pressed', String(mode === 'demo' && !starting));
   ui.overlay.hidden = mode !== 'idle';
+  ui.overlay.querySelector('strong').textContent = starting ? 'Waiting for your camera' : 'Ready when you are';
   ui.dot.dataset.mode = mode;
-  setText(ui.mode, mode === 'demo' ? 'Demo scene' : mode === 'camera' ? 'Live camera' : 'Camera stopped');
+  setText(ui.mode, starting ? 'Starting camera…' : mode === 'demo' ? 'Demo scene' : mode === 'camera' ? 'Live camera' : 'Camera stopped');
   setText(ui.note, mode === 'demo' ? 'SIMULATED FINGERTIPS' : mode === 'camera' ? 'MIRRORED / LOCAL PROCESSING' : 'READY TO EXPLORE');
   setText(ui.tag, mode === 'demo' ? `DEMO / ${EFFECT_LABELS[renderer.effects.selected].toUpperCase()} / NORMAL FRAME`
     : mode === 'camera' ? `LIVE / ${EFFECT_LABELS[renderer.effects.selected].toUpperCase()}` : 'FINGERFRAME');
@@ -129,6 +82,7 @@ function resetFrame() {
   lastStats = performance.now();
   frameCount = 0;
   setText(ui.fps, '— fps');
+  setText(ui.geometry, 'Lost');
 }
 
 function releaseCamera() {
@@ -155,7 +109,7 @@ function startDemo() {
   renderer.resize(960, 600);
   resetFrame();
   refreshControls();
-  setMessage('Demo: normal frame → bowtie → hand interchange → normal frame. A and B keep their identities. The cycle takes 32 seconds; Start camera to try it yourself.');
+  setMessage('Demo: quad → bowtie → hand interchange. Start your camera to try it with your hands.');
   startLoop();
 }
 
@@ -268,7 +222,8 @@ function updateTrackingStatus(frame) {
       : frame.state === 'tracked' ? (frame.kind === 'bowtie' ? 'Bowtie tracked' : 'Frame tracked')
         : frame.state === 'predicting' ? 'Briefly predicting hand motion' : frame.state === 'holding' ? 'Holding last frame' : frame.reason);
   }
-  setText(ui.hands, mode === 'demo' ? '4 simulated fingertips' : `${handCount} / 2 hands`);
+  setText(ui.hands, mode === 'demo' ? '2 simulated hands' : `${handCount} / 2 hands`);
+  setText(ui.geometry, frame.regions.length && frame.opacity > 0 ? (frame.kind === 'bowtie' ? 'Bowtie' : 'Quad') : 'Lost');
   if (mode === 'demo') setText(ui.tag, `DEMO / ${EFFECT_LABELS[renderer.effects.selected].toUpperCase()} / ${demoPhase(demoTime).toUpperCase()}`);
 }
 
@@ -334,9 +289,7 @@ for (const button of document.querySelectorAll('[data-effect]')) {
     if (!renderer.effects.select(button.dataset.effect)) return;
     frameMotion.reset();
     for (const option of document.querySelectorAll('[data-effect]')) option.setAttribute('aria-pressed', String(option.dataset.effect === renderer.effects.selected));
-    const adjustments = $('#sketch-adjustments');
-    adjustments.hidden = renderer.effects.selected !== 'graphite';
-    if (!adjustments.hidden) adjustments.open = true;
+    workspaceUI.setGraphiteSelected(renderer.effects.selected === 'graphite');
     refreshControls();
     setMessage(`${EFFECT_LABELS[renderer.effects.selected]} selected. ${renderer.effects.selected === 'graphite'
       ? 'Three independent five-position controls retain your choices.'

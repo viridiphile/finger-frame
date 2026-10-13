@@ -4,6 +4,7 @@ test('exactly three modes retain independent five-position Graphite choices and 
   const errors=[]; page.on('pageerror',(error)=>errors.push(error.message));
   await page.goto('/');
   await expect(page.locator('[data-effect]')).toHaveCount(3);
+  await page.getByRole('button', { name: 'Graphite settings', exact: true }).click();
   const names=['sensitivity','lineIntensity','shadingIntensity'];
   for(const name of names) {
     const slider=page.locator(`#${name}`);
@@ -18,7 +19,10 @@ test('exactly three modes retain independent five-position Graphite choices and 
   for(const type of ['solarize','motion-glitch','graphite']) {
     await page.locator(`[data-effect="${type}"]`).click();
     await expect(page.locator(`[data-effect="${type}"]`)).toHaveAttribute('aria-pressed','true');
-    if(type==='graphite') await expect(page.locator('#sketch-adjustments')).toBeVisible();
+    if(type==='graphite') {
+      await page.getByRole('button', { name: 'Graphite settings', exact: true }).click();
+      await expect(page.locator('#sketch-adjustments')).toBeVisible();
+    }
     else { await expect(page.locator('#sketch-adjustments')).toBeHidden(); await expect(page.locator('input[type="range"]:visible')).toHaveCount(0); }
     const download=page.waitForEvent('download'); await page.locator('#capture-btn').click();
     const file=await download; const stream=await file.createReadStream(); const chunks=[];

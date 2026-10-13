@@ -174,6 +174,20 @@ test('foreground mask restores source palm/finger pixels, feathers edges, and ex
   expect(result.expired[0]).toBe(result.expired[1]);
 });
 
+test('the live demo shows both bowtie lobes, hand interchange, and the normal return', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#stage-tag')).toContainText('BOWTIE · TWO FILTERED LOBES', { timeout:15000 });
+  await expect(page.locator('#tracking-label')).toHaveText('Simulated bowtie · both lobes');
+  await page.screenshot({ path:'test-results/demo-bowtie.png', fullPage:true });
+  await expect(page.locator('#stage-tag')).toContainText('HAND INTERCHANGE', { timeout:10000 });
+  await expect(page.locator('#stage-tag')).toContainText('NORMAL FRAME · A IS NOW ON THE RIGHT', { timeout:15000 });
+  await expect(page.locator('#tracking-label')).toHaveText('Simulated frame');
+  await page.screenshot({ path:'test-results/demo-interchanged.png', fullPage:true });
+  await page.locator('#demo-btn').click();
+  await expect(page.locator('#stage-tag')).toHaveText('DEMO / NORMAL FRAME');
+  await expect(page.locator('#error-message')).toBeHidden();
+});
+
 test('denied camera permission gives a useful error and the demo remains usable', async ({ page }) => {
   await page.addInitScript(() => {
     navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Test permission denial', 'NotAllowedError'); };

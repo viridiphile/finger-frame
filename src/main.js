@@ -4,7 +4,7 @@ import { FrameStabilizer } from './frameGeometry.js';
 import { HandIdentityTracker, extractHands, fingertipsFromHands } from './handAssociation.js';
 import { HandTracker } from './handTracking.js';
 import { Renderer } from './renderer.js';
-import { drawDemoScene, demoFingertips } from './demo.js';
+import { drawDemoScene, drawDemoHands, demoHands, demoPhase } from './demo.js';
 import { SKETCH_DEFAULTS } from './effects.js';
 
 const icon = (content) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${content}</svg>`;
@@ -80,6 +80,8 @@ let lastStats = 0;
 let frameCount = 0;
 let handCount = 0;
 let trackingState = '';
+let demoStartedAt = 0;
+let demoTime = 0;
 
 function setText(element, value) {
   if (element.textContent !== value) element.textContent = value;
@@ -98,7 +100,7 @@ function refreshControls() {
   ui.dot.dataset.mode = mode;
   setText(ui.mode, mode === 'demo' ? 'Demo scene' : mode === 'camera' ? 'Live camera' : 'Camera stopped');
   setText(ui.note, mode === 'demo' ? 'SIMULATED FINGERTIPS' : mode === 'camera' ? 'MIRRORED / LOCAL PROCESSING' : 'READY TO EXPLORE');
-  setText(ui.tag, mode === 'demo' ? 'DEMO / PENCIL STUDY' : mode === 'camera' ? 'LIVE / PENCIL STUDY' : 'FINGERFRAME');
+  setText(ui.tag, mode === 'demo' ? 'DEMO / NORMAL FRAME' : mode === 'camera' ? 'LIVE / PENCIL STUDY' : 'FINGERFRAME');
   ui.canvas.setAttribute('aria-label', mode === 'demo'
     ? 'Animated demo with a pencil sketch inside the simulated finger frame'
     : 'Mirrored webcam with a pencil sketch inside your four fingertip frame');
@@ -136,10 +138,11 @@ function startDemo() {
   releaseCamera();
   clearError();
   mode = 'demo';
+  demoStartedAt = performance.now();
   renderer.resize(960, 600);
   resetFrame();
   refreshControls();
-  setMessage('Demo running. The frame gently moves, rotates, and resizes. Start your camera to try it with your hands.');
+  setMessage('Demo: normal frame → bowtie → hand interchange → normal frame. A and B keep their identities. The cycle takes 32 seconds; Start camera to try it yourself.');
   startLoop();
 }
 
@@ -243,16 +246,17 @@ async function startCamera() {
 }
 
 function updateTrackingStatus(frame) {
-  const state = mode === 'demo' ? 'demo' : !trackingReady ? trackerStatus : `${frame.state}:${frame.reason}`;
+  const state = mode === 'demo' ? `demo:${frame.kind}:${frame.state}` : !trackingReady ? trackerStatus : `${frame.state}:${frame.reason}`;
   if (state !== trackingState) {
     trackingState = state;
-    ui.pill.dataset.state = mode === 'demo' ? 'tracked' : frame.state;
-    setText(ui.tracking, mode === 'demo' ? 'Simulated frame' : !trackingReady
+    ui.pill.dataset.state = frame.state;
+    setText(ui.tracking, mode === 'demo' ? (frame.kind === 'bowtie' ? 'Simulated bowtie · both lobes' : 'Simulated frame') : !trackingReady
       ? (trackerStatus === 'error' ? 'Tracker unavailable' : 'Loading hand tracker')
       : frame.state === 'tracked' ? (frame.kind === 'bowtie' ? 'Bowtie tracked' : 'Frame tracked')
         : frame.state === 'predicting' ? 'Briefly predicting hand motion' : frame.state === 'holding' ? 'Holding last frame' : frame.reason);
   }
   setText(ui.hands, mode === 'demo' ? '4 simulated fingertips' : `${handCount} / 2 hands`);
+  if (mode === 'demo') setText(ui.tag, `DEMO / ${demoPhase(demoTime).toUpperCase()}`);
 }
 
 function render(timestamp) {
@@ -262,8 +266,11 @@ function render(timestamp) {
     lastRender = timestamp;
     let hands = [];
     if (mode === 'demo') {
-      drawDemoScene(renderer.sourceContext, ui.canvas.width, ui.canvas.height, timestamp);
-      stabilizer.update(demoFingertips(ui.canvas.width, ui.canvas.height, timestamp), timestamp, ui.canvas.width, ui.canvas.height);
+      demoTime = timestamp - demoStartedAt;
+      drawDemoScene(renderer.sourceContext, ui.canvas.width, ui.canvas.height, demoTime);
+      const simulated = demoHands(ui.canvas.width, ui.canvas.height, demoTime);
+      drawDemoHands(renderer.sourceContext, simulated, ui.canvas.width, ui.canvas.height);
+      identities.update(simulated, timestamp, ui.canvas.width, ui.canvas.height);
     } else if (ui.video.readyState >= 2) {
       renderer.drawCamera(ui.video);
       if (trackingReady) {
@@ -283,10 +290,10 @@ function render(timestamp) {
           showError('Hand detection stopped. Stop and restart the camera to retry, or use Demo scene.');
         }
       }
-      hands = identities.snapshot(timestamp);
-      stabilizer.update(fingertipsFromHands(hands), timestamp, ui.canvas.width, ui.canvas.height,
-        { observedAt: hands.length === 2 ? Math.min(hands[0].lastSeen, hands[1].lastSeen) : -Infinity });
     }
+    hands = identities.snapshot(timestamp);
+    stabilizer.update(fingertipsFromHands(hands), timestamp, ui.canvas.width, ui.canvas.height,
+      { observedAt: hands.length === 2 ? Math.min(hands[0].lastSeen, hands[1].lastSeen) : -Infinity });
     const frame = stabilizer.snapshot(timestamp);
     try {
       renderer.composite(frame, ui.effect.checked, true, hands);
@@ -345,7 +352,11 @@ window.addEventListener('pagehide', () => {
   tracker.close();
 });
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) resetFrame();
+  if (!document.hidden) {
+    resetFrame();
+    // Keep a tab return continuous rather than advancing through unseen phases.
+    if (mode === 'demo') demoStartedAt = performance.now() - demoTime;
+  }
 });
 
 startDemo();

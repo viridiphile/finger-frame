@@ -1,6 +1,7 @@
 
 import './style.css';
-import { FrameStabilizer, extractFingertips } from './frameGeometry.js';
+import { FrameStabilizer } from './frameGeometry.js';
+import { HandIdentityTracker, extractHands, fingertipsFromHands } from './handAssociation.js';
 import { HandTracker } from './handTracking.js';
 import { Renderer } from './renderer.js';
 import { drawDemoScene, demoFingertips } from './demo.js';
@@ -56,6 +57,7 @@ const ui = {
 };
 const renderer = new Renderer(ui.canvas);
 const stabilizer = new FrameStabilizer();
+const identities = new HandIdentityTracker();
 const tracker = new HandTracker();
 let mode = 'idle';
 let stream = null;
@@ -95,6 +97,7 @@ function refreshControls() {
 
 function resetFrame() {
   stabilizer.reset();
+  identities.reset();
   tracker.resetVideo();
   trackingState = '';
   handCount = 0;
@@ -237,7 +240,8 @@ function updateTrackingStatus(frame) {
     ui.pill.dataset.state = mode === 'demo' ? 'tracked' : frame.state;
     setText(ui.tracking, mode === 'demo' ? 'Simulated frame' : !trackingReady
       ? (trackerStatus === 'error' ? 'Tracker unavailable' : 'Loading hand tracker')
-      : frame.state === 'tracked' ? 'Frame tracked' : frame.state === 'holding' ? 'Holding last frame' : frame.reason);
+      : frame.state === 'tracked' ? (frame.kind === 'bowtie' ? 'Bowtie tracked' : 'Frame tracked')
+        : frame.state === 'predicting' ? 'Briefly predicting hand motion' : frame.state === 'holding' ? 'Holding last frame' : frame.reason);
   }
   setText(ui.hands, mode === 'demo' ? '4 simulated fingertips' : `${handCount} / 2 hands`);
 }
@@ -257,17 +261,21 @@ function render(timestamp) {
           const result = tracker.detect(ui.video, timestamp);
           if (result !== undefined) {
             handCount = result.landmarks.length;
-            stabilizer.update(extractFingertips(result, ui.canvas.width, ui.canvas.height), timestamp, ui.canvas.width, ui.canvas.height);
+            identities.update(extractHands(result, ui.canvas.width, ui.canvas.height), timestamp, ui.canvas.width, ui.canvas.height);
           }
         } catch (error) {
           console.error('Hand detection failed:', error);
           trackingReady = false;
           trackerStatus = 'error';
           stabilizer.reset();
+          identities.reset();
           tracker.close();
           showError('Hand detection stopped. Stop and restart the camera to retry, or use Demo scene.');
         }
       }
+      const hands = identities.snapshot(timestamp);
+      stabilizer.update(fingertipsFromHands(hands), timestamp, ui.canvas.width, ui.canvas.height,
+        { observedAt: hands.length === 2 ? Math.min(hands[0].lastSeen, hands[1].lastSeen) : -Infinity });
     }
     const frame = stabilizer.snapshot(timestamp);
     try {

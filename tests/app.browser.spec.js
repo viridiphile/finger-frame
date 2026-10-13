@@ -83,6 +83,37 @@ test('compositing changes only pixels inside a rotated polygon and clears when d
   expect(result.restored).toBe(true);
 });
 
+test('a bowtie filters both lobes once, preserving the unframed side regions', async ({ page }) => {
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    const { Renderer } = await import('/src/renderer.js');
+    const { validateFrame } = await import('/src/frameGeometry.js');
+    const canvas = document.createElement('canvas');
+    const renderer = new Renderer(canvas);
+    renderer.resize(200, 200);
+    renderer.sourceContext.fillStyle = '#bd4932';
+    renderer.sourceContext.fillRect(0, 0, 200, 200);
+    const geometry = validateFrame([
+      { x: 180, y: 180, hand: 0, finger: 0 }, { x: 20, y: 20, hand: 0, finger: 1 },
+      { x: 20, y: 180, hand: 1, finger: 0 }, { x: 180, y: 20, hand: 1, finger: 1 },
+    ], 200, 200);
+    let processingCalls = 0;
+    const process = renderer.sketch.process.bind(renderer.sketch);
+    renderer.sketch.process = (...args) => { processingCalls++; return process(...args); };
+    renderer.composite({ ...geometry, opacity: 1, state: 'tracked' }, true, false);
+    const pixel = (x, y) => [...renderer.context.getImageData(x, y, 1, 1).data];
+    return { kind: geometry.kind, processingCalls, top: pixel(100, 50), bottom: pixel(100, 150), left: pixel(50, 100), right: pixel(150, 100) };
+  });
+  expect(result.kind).toBe('bowtie');
+  expect(result.processingCalls).toBe(1);
+  for (const pixel of [result.top, result.bottom]) {
+    expect(pixel[0]).toBe(pixel[1]);
+    expect(pixel[1]).toBe(pixel[2]);
+  }
+  expect(result.left).toEqual([189, 73, 50, 255]);
+  expect(result.right).toEqual([189, 73, 50, 255]);
+});
+
 test('denied camera permission gives a useful error and the demo remains usable', async ({ page }) => {
   await page.addInitScript(() => {
     navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Test permission denial', 'NotAllowedError'); };

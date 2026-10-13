@@ -2,8 +2,12 @@ import { PencilSketch } from './effects.js';
 
 export function polygonPath(context, points) {
   context.beginPath();
+  appendPolygonPath(context, points);
+}
+
+function appendPolygonPath(context, points) {
   context.moveTo(points[0].x, points[0].y);
-  for (const point of points.slice(1)) context.lineTo(point.x, point.y);
+  for (let i = 1; i < points.length; i++) context.lineTo(points[i].x, points[i].y);
   context.closePath();
 }
 
@@ -40,8 +44,11 @@ export class Renderer {
     if (effectEnabled) {
       const sketch = this.sketch.process(this.source);
       ctx.save();
-      polygonPath(ctx, frame.polygon);
-      ctx.clip();
+      ctx.beginPath();
+      for (const region of frame.regions ?? [frame.polygon]) appendPolygonPath(ctx, region);
+      // One compound clip and one image draw for both lobes: same pixels,
+      // same alpha, and no repeated filter work at the shared crossing.
+      ctx.clip('evenodd');
       ctx.globalAlpha = frame.opacity;
       ctx.drawImage(sketch, 0, 0, width, height);
       ctx.restore();
@@ -58,9 +65,9 @@ export class Renderer {
     ctx.strokeStyle = 'rgba(18, 38, 30, .55)';
     ctx.lineWidth = 4 * unit;
     ctx.stroke();
-    ctx.strokeStyle = frame.state === 'holding' ? '#f5c578' : '#c4f6d3';
+    ctx.strokeStyle = frame.state === 'holding' || frame.state === 'predicting' ? '#f5c578' : '#c4f6d3';
     ctx.lineWidth = 1.7 * unit;
-    if (frame.state === 'holding') ctx.setLineDash([6 * unit, 5 * unit]);
+    if (frame.state === 'holding' || frame.state === 'predicting') ctx.setLineDash([6 * unit, 5 * unit]);
     ctx.stroke();
     ctx.setLineDash([]);
     for (const point of frame.polygon) {

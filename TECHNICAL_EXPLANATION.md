@@ -1,8 +1,20 @@
 # FingerFrame — technical explanation
 
+## Compact workspace frontend
+
+`workspaceView.js` owns static presentation and a single repository URL confirmed against Git origin. `workspaceUI.js` handles the Graphite overlay, native modal dialog and five accessible accordion buttons. The calibrated `GraphiteControls` object and processors are reused; the popover changes visibility only. It closes on its button, outside pointer/focus, Escape, effect switching or viewport resizing. On opening it chooses available space above/below the button and scrolls internally when needed.
+
+The workspace uses a `100dvh` grid with a flexible `minmax(0, 1fr)` preview row. Canvas uses `object-fit: contain` to preserve the source aspect ratio. Small widths and short heights allow page scrolling with a usable minimum preview; controls are never clipped to enforce a single screen. UI interactions leave intrinsic Canvas dimensions unchanged. Existing rendering runs at its usual cadence; telemetry changes text only when values change and reports Quad, Bowtie or Lost.
+
+About uses `dialog.showModal()` for browser-managed background inertness and keyboard focus containment. Close/Escape restores trigger focus; the root scroll is locked while open. The heading/close control remain visible while expanded content scrolls internally. Accordion buttons expose `aria-expanded` and `aria-controls`.
+
+`CaptureCountdown` shows 3 immediately, 2 after one second, 1 after two seconds, then invokes Canvas `toBlob` after three seconds. The countdown is a DOM sibling of Canvas, so it cannot enter exported pixels. Rendering continues throughout and only the final rendered frame is encoded. Capture remains active/disabled during asynchronous encoding, preventing overlapping timers or downloads. A generation token invalidates canceled callbacks, so a late encoded image cannot download or end a newer countdown. Stop, source reset/replacement, page departure and tab hiding clear the timer and invalidate the token. Null images or encoding exceptions restore the control and show retry guidance. Download still uses a temporary object URL and anchor, with URL cleanup.
+
+No MediaPipe, hand association, smoothing, geometry, masking, image-processing, renderer or demo modules were modified by the frontend iteration. Five countdown lifecycle tests supplement the existing 52 processing tests. Seven new browser acceptance checks supplement the existing 12, including exact PNG byte equality with the final Canvas export, final-frame change, viewport fitting, focus containment, overlay bounds, cancellation and failure recovery. The production synthetic-camera test also captures a 640×360 PNG and cancels a webcam countdown on Stop. Physical-camera and cross-browser verification remain manual.
+
 ## V3: shared architecture
 
-V3 preserves V2 hand tracking, anatomical bowties, foreground masking, camera controls, the landing page and PNG capture. It adds Graphite control calibration, Chromatic Solarization, Motion Glitch and more tolerant near-degenerate geometry. No dependencies or models were added.
+V3 preserves V2 hand tracking, anatomical bowties, foreground masking, camera controls and Canvas PNG capture. It adds Graphite control calibration, Chromatic Solarization, Motion Glitch and more tolerant near-degenerate geometry. No dependencies or models were added. The subsequent frontend iteration replaces the landing page with the compact workspace described above.
 
 ```text
 unmirrored camera → MediaPipe → mirrored 21-point hands → persistent A/B slots

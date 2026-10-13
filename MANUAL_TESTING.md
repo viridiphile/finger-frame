@@ -1,0 +1,18 @@
+# Manual testing checklist
+
+Run `npm ci` and `npm run dev` from the project directory. Open Vite's Local URL in Chrome. Also repeat the main flow with `npm run build` and `npm run preview` before presenting.
+
+These checkboxes are intentionally **uncompleted**: automated tests are documented in the README, and physical webcam behavior requires a person with a camera.
+
+- [ ] **Demo:** opening the page starts an animated scene without a permission prompt. The four-corner window moves, rotates and resizes; its interior looks like pencil and the surrounding image stays in color.
+- [ ] **Controls/export:** toggle Pencil effect off and on. Only the interior effect changes; the outline remains. Capture downloads a valid PNG showing the displayed frame. Resize the browser to a narrow/mobile layout; controls remain usable. Navigate the controls with Tab and Space/Enter.
+- [ ] **Start/mirror:** press Start camera and allow access. Wait for the tracker. Raise your right hand and confirm it appears on the right side of the mirrored preview. Confirm the camera activity indicator is on and that audio is not requested.
+- [ ] **Two-hand frame:** face the camera in even light. Spread each thumb and index into an L, making a clear open window with four separated tips. Confirm `2 / 2 hands`, `Frame tracked`, four markers near the fingertips, and recognizable sketch detail inside the quadrilateral. Check that the surrounding video remains unchanged apart from the outline.
+- [ ] **Motion:** slowly translate left/right/up/down, rotate in both directions and change the window size. The frame follows smoothly without corners jumping or pixels outside it changing style. Observe the FPS under actual camera load; note the browser, resolution, lighting and measured rate.
+- [ ] **Brief/long loss:** briefly hide one hand (about 0.1–0.2 seconds). The frame should hold briefly. Hide it for over 0.4 seconds; the outline/effect should fade away. Bring it back and confirm automatic recovery. There should be no stale polygon indefinitely.
+- [ ] **Bad geometry:** pinch thumb/index together, shrink the window, overlap/cross hands and move a finger out of view. The frame should hold/fade or reject with guidance, without crashes or large immediate jumps. Uncross and open the window to recover.
+- [ ] **Cleanup/restart:** press Stop; the canvas clears, Capture disables and the camera activity indicator turns off. Start again, then choose Demo scene; the camera indicator turns off and the animated demo returns. Repeat twice and navigate away to verify the camera stops. Switch tabs and return to confirm tracking reacquires.
+- [ ] **Permission failure/cancellation:** block camera permission in the browser and retry. A useful error appears while Demo remains available. Restore permission. During a permission prompt, use Stop/Demo; allowing the old request afterward must not activate a stopped camera. Some browsers present a modal prompt that must be dismissed before page controls can be clicked.
+- [ ] **Unavailable device/model:** test with the camera unavailable or busy if possible; verify recovery guidance. Disconnect a supported external camera during playback and confirm an error/stop. With camera stopped, block `**/mediapipe/**` requests in DevTools and reload/start to simulate a model load failure; preview should remain available, and Demo should work. Remove the block before retrying.
+
+For a classroom fallback, load the demo, disconnect the internet, and confirm animation, effect and Capture continue working. Local model files allow a new camera session without internet as well. The Vite server must keep running; the app does not install an offline service worker.

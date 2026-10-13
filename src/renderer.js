@@ -1,0 +1,77 @@
+import { PencilSketch } from './effects.js';
+
+export function polygonPath(context, points) {
+  context.beginPath();
+  context.moveTo(points[0].x, points[0].y);
+  for (const point of points.slice(1)) context.lineTo(point.x, point.y);
+  context.closePath();
+}
+
+export class Renderer {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.context = canvas.getContext('2d');
+    this.source = document.createElement('canvas');
+    this.sourceContext = this.source.getContext('2d');
+    this.sketch = new PencilSketch();
+    this.resize(960, 600);
+  }
+
+  resize(width, height) {
+    this.canvas.width = this.source.width = width;
+    this.canvas.height = this.source.height = height;
+  }
+
+  drawCamera(video) {
+    const ctx = this.sourceContext;
+    ctx.save();
+    ctx.translate(this.source.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0, this.source.width, this.source.height);
+    ctx.restore();
+  }
+
+  composite(frame, effectEnabled, showOutline = true) {
+    const ctx = this.context;
+    const { width, height } = this.canvas;
+    // Always redraw the original source: disabling the effect leaves no residue.
+    ctx.drawImage(this.source, 0, 0, width, height);
+    if (!frame.polygon || frame.opacity <= 0) return;
+    if (effectEnabled) {
+      const sketch = this.sketch.process(this.source);
+      ctx.save();
+      polygonPath(ctx, frame.polygon);
+      ctx.clip();
+      ctx.globalAlpha = frame.opacity;
+      ctx.drawImage(sketch, 0, 0, width, height);
+      ctx.restore();
+    }
+    if (showOutline) this.drawOutline(frame);
+  }
+
+  drawOutline(frame) {
+    const ctx = this.context;
+    const unit = Math.max(1, this.canvas.width / 960);
+    ctx.save();
+    ctx.globalAlpha = frame.opacity;
+    polygonPath(ctx, frame.polygon);
+    ctx.strokeStyle = 'rgba(18, 38, 30, .55)';
+    ctx.lineWidth = 4 * unit;
+    ctx.stroke();
+    ctx.strokeStyle = frame.state === 'holding' ? '#f5c578' : '#c4f6d3';
+    ctx.lineWidth = 1.7 * unit;
+    if (frame.state === 'holding') ctx.setLineDash([6 * unit, 5 * unit]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    for (const point of frame.polygon) {
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 5.5 * unit, 0, Math.PI * 2);
+      ctx.fillStyle = '#f6fff8';
+      ctx.fill();
+      ctx.lineWidth = 2 * unit;
+      ctx.strokeStyle = '#276147';
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}

@@ -140,6 +140,40 @@ test('sketch adjustments work and ordinary frames retain native processing detai
   expect(result.reused).toBe(true);
 });
 
+test('foreground mask restores source palm/finger pixels, feathers edges, and expires', async ({ page }) => {
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    const { Renderer } = await import('/src/renderer.js');
+    const canvas = document.createElement('canvas');
+    const renderer = new Renderer(canvas); renderer.resize(200, 200);
+    renderer.sourceContext.fillStyle = '#c5825e'; renderer.sourceContext.fillRect(0, 0, 200, 200);
+    const landmarks = [
+      [100,158],[83,139],[69,123],[56,107],[46,98],
+      [80,108],[76,86],[73,65],[72,46], [98,102],[98,77],[98,54],[98,35],
+      [116,108],[119,86],[121,65],[122,48], [131,122],[139,108],[143,94],[146,80],
+    ].map(([x,y]) => ({x,y}));
+    const frame = { polygon: [{x:20,y:20},{x:180,y:20},{x:180,y:180},{x:20,y:180}], opacity:1, state:'tracked' };
+    const hand = { landmarks, maskOpacity:1 };
+    renderer.composite(frame, true, false, [hand]);
+    const pixel = (x,y) => [...renderer.context.getImageData(x,y,1,1).data];
+    const palm = pixel(100,130), finger = pixel(98,55), background = pixel(165,45), outside = pixel(10,10);
+    const alpha = renderer.handMask.featherContext.getImageData(0,0,200,200).data;
+    let feathered = 0;
+    for (let i=3;i<alpha.length;i+=4) if(alpha[i]>0 && alpha[i]<255) feathered++;
+    renderer.composite(frame, true, false, [{ ...hand, maskOpacity:0 }]);
+    return { palm, finger, background, outside, feathered, expired:pixel(100,130) };
+  });
+  expect(result.palm).toEqual([197,130,94,255]);
+  // A narrow finger's feathered edge can contribute a fraction of a filtered
+  // pixel even at its center. Require the original color within rounding.
+  [197,130,94,255].forEach((value, channel) => expect(Math.abs(result.finger[channel] - value)).toBeLessThanOrEqual(2));
+  expect(result.outside).toEqual([197,130,94,255]);
+  expect(result.background[0]).toBe(result.background[1]);
+  expect(result.background[1]).toBe(result.background[2]);
+  expect(result.feathered).toBeGreaterThan(100);
+  expect(result.expired[0]).toBe(result.expired[1]);
+});
+
 test('denied camera permission gives a useful error and the demo remains usable', async ({ page }) => {
   await page.addInitScript(() => {
     navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Test permission denial', 'NotAllowedError'); };

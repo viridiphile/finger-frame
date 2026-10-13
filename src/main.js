@@ -260,6 +260,7 @@ function render(timestamp) {
   if (mode === 'idle') return;
   if (!document.hidden && timestamp - lastRender >= 1000 / 30 - 1) {
     lastRender = timestamp;
+    let hands = [];
     if (mode === 'demo') {
       drawDemoScene(renderer.sourceContext, ui.canvas.width, ui.canvas.height, timestamp);
       stabilizer.update(demoFingertips(ui.canvas.width, ui.canvas.height, timestamp), timestamp, ui.canvas.width, ui.canvas.height);
@@ -282,13 +283,13 @@ function render(timestamp) {
           showError('Hand detection stopped. Stop and restart the camera to retry, or use Demo scene.');
         }
       }
-      const hands = identities.snapshot(timestamp);
+      hands = identities.snapshot(timestamp);
       stabilizer.update(fingertipsFromHands(hands), timestamp, ui.canvas.width, ui.canvas.height,
         { observedAt: hands.length === 2 ? Math.min(hands[0].lastSeen, hands[1].lastSeen) : -Infinity });
     }
     const frame = stabilizer.snapshot(timestamp);
     try {
-      renderer.composite(frame, ui.effect.checked);
+      renderer.composite(frame, ui.effect.checked, true, hands);
     } catch (error) {
       console.error('Sketch rendering failed:', error);
       ui.effect.checked = false;

@@ -1,4 +1,5 @@
 import { PencilSketch } from './effects.js';
+import { ForegroundHandMask } from './handMask.js';
 
 export function polygonPath(context, points) {
   context.beginPath();
@@ -18,6 +19,7 @@ export class Renderer {
     this.source = document.createElement('canvas');
     this.sourceContext = this.source.getContext('2d');
     this.sketch = new PencilSketch();
+    this.handMask = new ForegroundHandMask();
     this.resize(960, 600);
   }
 
@@ -35,7 +37,7 @@ export class Renderer {
     ctx.restore();
   }
 
-  composite(frame, effectEnabled, showOutline = true) {
+  composite(frame, effectEnabled, showOutline = true, hands = []) {
     const ctx = this.context;
     const { width, height } = this.canvas;
     // Always redraw the original source: disabling the effect leaves no residue.
@@ -52,6 +54,10 @@ export class Renderer {
       ctx.globalAlpha = frame.opacity;
       const bounds = this.sketch.bounds;
       ctx.drawImage(sketch, bounds.x, bounds.y, bounds.width, bounds.height);
+      // Restore actual source pixels, not a painted skin color. The current
+      // polygon clip also confines feathering so outside pixels stay exact.
+      ctx.globalAlpha = 1;
+      this.handMask.restore(ctx, this.source, hands);
       ctx.restore();
     }
     if (showOutline) this.drawOutline(frame);

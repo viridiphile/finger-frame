@@ -120,6 +120,7 @@ test('continuously redrawing predicted coordinates cannot prevent expiration', (
   const stabilizer = new FrameStabilizer();
   for (let t = 0; t <= 600; t += 20) stabilizer.update(rectangle(), t, width, height, { observedAt: 0 });
   assert.equal(stabilizer.snapshot(600).polygon, null);
+  assert.equal(stabilizer.snapshot(600).reason, 'Show both hands');
 });
 
 test('normal → bowtie → reversed normal returns without changing anatomy', () => {

@@ -106,7 +106,7 @@ export class FrameStabilizer {
   update(points, timestamp, width, height, { observedAt = timestamp } = {}) {
     const validation = validateFrame(points, width, height);
     this.measurementValid = validation.valid;
-    this.reason = validation.reason;
+    this.reason = validation.valid && timestamp - observedAt > 150 ? 'Show both hands' : validation.reason;
     if (validation.valid && timestamp - observedAt < this.holdMs + this.fadeMs) {
       if (!this.geometry || timestamp - this.lastValid >= this.holdMs + this.fadeMs) this.acquiredAt = timestamp;
       this.geometry = validation;

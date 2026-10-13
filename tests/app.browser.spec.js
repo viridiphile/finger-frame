@@ -114,6 +114,32 @@ test('a bowtie filters both lobes once, preserving the unframed side regions', a
   expect(result.right).toEqual([189, 73, 50, 255]);
 });
 
+test('sketch adjustments work and ordinary frames retain native processing detail', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#sketch-adjustments summary').click();
+  for (const name of ['sensitivity', 'lineIntensity', 'shadingIntensity']) {
+    await page.locator(`#${name}`).fill('40');
+    await expect(page.locator(`#${name}-value`)).toHaveText('40%');
+  }
+  const result = await page.evaluate(async () => {
+    const { PencilSketch } = await import('/src/effects.js');
+    const source = document.createElement('canvas');
+    source.width = 1280; source.height = 720;
+    const ctx = source.getContext('2d');
+    ctx.fillStyle = '#665d50'; ctx.fillRect(0, 0, 1280, 720);
+    const sketch = new PencilSketch();
+    const points = [{ x: 200, y: 100 }, { x: 800, y: 100 }, { x: 800, y: 450 }, { x: 200, y: 450 }];
+    sketch.process(source, points);
+    const width = sketch.canvas.width, height = sketch.canvas.height;
+    const gray = sketch.buffers.gray;
+    sketch.process(source, points.map((p) => ({ x: p.x + 1, y: p.y })));
+    return { width, height, reused: sketch.buffers.gray === gray };
+  });
+  expect(result.width).toBe(606);
+  expect(result.height).toBe(356);
+  expect(result.reused).toBe(true);
+});
+
 test('denied camera permission gives a useful error and the demo remains usable', async ({ page }) => {
   await page.addInitScript(() => {
     navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Test permission denial', 'NotAllowedError'); };

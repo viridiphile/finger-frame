@@ -42,7 +42,7 @@ export class Renderer {
     ctx.drawImage(this.source, 0, 0, width, height);
     if (!frame.polygon || frame.opacity <= 0) return;
     if (effectEnabled) {
-      const sketch = this.sketch.process(this.source);
+      const sketch = this.sketch.process(this.source, frame.polygon);
       ctx.save();
       ctx.beginPath();
       for (const region of frame.regions ?? [frame.polygon]) appendPolygonPath(ctx, region);
@@ -50,7 +50,8 @@ export class Renderer {
       // same alpha, and no repeated filter work at the shared crossing.
       ctx.clip('evenodd');
       ctx.globalAlpha = frame.opacity;
-      ctx.drawImage(sketch, 0, 0, width, height);
+      const bounds = this.sketch.bounds;
+      ctx.drawImage(sketch, bounds.x, bounds.y, bounds.width, bounds.height);
       ctx.restore();
     }
     if (showOutline) this.drawOutline(frame);

@@ -1,3 +1,5 @@
+import { GRAPHITE_DEFAULT_LEVELS, GRAPHITE_LEVELS } from './graphiteControls.js';
+
 // Confirmed against origin; both repository links use this one destination.
 export const REPOSITORY_URL = 'https://github.com/viridiphile/finger-frame';
 
@@ -17,7 +19,7 @@ const sections = [
   ['Rendering Pipeline', 'The original video or demo supplies a cropped effect pass. Canvas clips processed layers to the anatomical frame, restores foreground hands, then adds the outline. Capture exports this final composite.'],
 ];
 
-const slider = (name, label, value) => `<label for="${name}">${label}<output id="${name}-value" for="${name}">${value}%</output><input id="${name}" type="range" min="0" max="100" step="25" value="${value}"><span class="range-levels" aria-hidden="true">${[0, 25, 50, 75, 100].map((level) => `<span>${level}%</span>`).join('')}</span></label>`;
+const slider = (name, label, value = GRAPHITE_DEFAULT_LEVELS[name]) => `<label for="${name}">${label}<output id="${name}-value" for="${name}">${value}%</output><input id="${name}" type="range" min="0" max="100" step="25" value="${value}"><span class="range-levels" aria-hidden="true">${GRAPHITE_LEVELS.map((level) => `<span>${level}%</span>`).join('')}</span></label>`;
 
 export const workspaceView = `
   <main class="studio">
@@ -47,7 +49,7 @@ export const workspaceView = `
           <button class="icon-button" id="settings-btn" type="button" aria-label="Graphite settings" title="Graphite settings" aria-expanded="false" aria-controls="sketch-adjustments">${settingsIcon}</button>
           <section class="sketch-adjustments" id="sketch-adjustments" aria-labelledby="graphite-title" hidden>
             <h2 id="graphite-title">Graphite settings</h2>
-            <div class="adjustment-grid">${slider('sensitivity', 'Edge Sensitivity', 50)}${slider('lineIntensity', 'Line Intensity', 75)}${slider('shadingIntensity', 'Shading Intensity', 50)}</div>
+            <div class="adjustment-grid">${slider('sensitivity', 'Edge Sensitivity')}${slider('lineIntensity', 'Line Intensity')}${slider('shadingIntensity', 'Shading Intensity')}</div>
           </section>
         </div>
       </div>

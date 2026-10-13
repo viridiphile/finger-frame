@@ -19,8 +19,8 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 [hidden] { display: none !important; }
 svg { width: 20px; height: 20px; flex-shrink: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
-.studio { max-width: 1600px; height: 100vh; height: 100dvh; padding: 0 24px 16px; margin: 0 auto; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; }
-.header { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.studio { max-width: 1600px; height: 100vh; height: 100dvh; padding: 0 24px 12px; margin: 0 auto; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; }
+.header { min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--green); font-size: 20px; font-weight: 650; letter-spacing: -.8px; }
 .brand-mark { width: 32px; height: 32px; display: grid; place-items: center; background: var(--green); color: #f4f7ed; border-radius: 9px; }
 .brand-mark svg { width: 21px; height: 21px; }
@@ -133,7 +133,7 @@ svg { width: 20px; height: 20px; flex-shrink: 0; }
   .telemetry { padding-inline: 12px; }
   .metrics { font-size: 9px; }
   .controls { padding-inline: 12px; }
-  .source-controls { gap: 5px; width: 100%; }
+  .source-controls { gap: 5px; width: 100%; flex-wrap: wrap; }
   .source-controls .primary { flex: 1; }
   .effect-controls { margin: 0; width: 100%; justify-content: space-between; }
   .control-divider { display: none; }

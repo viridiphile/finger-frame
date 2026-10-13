@@ -169,10 +169,14 @@ export function demoHands(width, height, timestamp) {
   const t = ((timestamp / 1000) % 32 + 32) % 32;
   const exchange = eased(t, 12, 18) - eased(t, 26, 32);
   const flip = eased(t, 4, 8) - eased(t, 18, 22);
-  const center = { x: width * 0.51, y: height * 0.52 };
-  const frameWidth = width * (0.43 + Math.sin(t * Math.PI / 16) * 0.025);
-  const frameHeight = height * (0.45 + Math.sin(t * Math.PI / 16) * 0.025);
-  const rotation = Math.sin(t * Math.PI / 16) * 0.11;
+  // Periodic, smooth gestures make automatic Motion Glitch demonstrable. All
+  // effects use the same pose, so selecting a mode never repositions the hands.
+  const phase = t * Math.PI / 4;
+  const center = { x: width * (0.51 + 0.08 * Math.sin(phase * 2)), y: height * (0.52 + 0.025 * Math.sin(phase * 3)) };
+  const breath = 1 + 0.08 * Math.sin(phase * 4);
+  const frameWidth = width * (0.43 + Math.sin(t * Math.PI / 16) * 0.025) * breath;
+  const frameHeight = height * (0.45 + Math.sin(t * Math.PI / 16) * 0.025) * breath;
+  const rotation = Math.sin(t * Math.PI / 16) * 0.11 + 0.24 * Math.sin(phase * 3);
   return [0, 1].map((id) => {
     const side = id === 0 ? -1 : 1;
     const cx = side * frameWidth / 2 * (1 - exchange * 2);

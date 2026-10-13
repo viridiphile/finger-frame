@@ -6,6 +6,8 @@ import { HandTracker } from './handTracking.js';
 import { Renderer } from './renderer.js';
 import { drawDemoScene, drawDemoHands, demoHands, demoPhase } from './demo.js';
 import { GraphiteControls } from './graphiteControls.js';
+import { FrameMotion, ZERO_MOTION } from './frameMotion.js';
+import { EFFECT_LABELS } from './effectPipeline.js';
 
 const icon = (content) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${content}</svg>`;
 const cameraIcon = icon('<rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 10 5-3v10l-5-3"/>');
@@ -20,7 +22,7 @@ document.querySelector('#app').innerHTML = `
     </header>
     <section class="intro" aria-labelledby="title">
       <div><p class="eyebrow">INTERACTIVE MULTIMEDIA · EXPERIMENT 01</p><h1 id="title">Your hands. A different perspective.</h1>
-      <p class="intro-copy">Make a frame with your thumbs and index fingers. Turn the world inside it into a pencil drawing.</p></div>
+      <p class="intro-copy">Make a frame with your thumbs and index fingers. Explore graphite, chromatic tones, and motion.</p></div>
       <div class="sketch-stamp" aria-hidden="true">four points.<br><span>one little world.</span></div>
     </section>
     <section class="workspace" aria-label="Finger frame studio">
@@ -30,6 +32,11 @@ document.querySelector('#app').innerHTML = `
         <video id="webcam" autoplay playsinline muted hidden aria-hidden="true"></video>
         <div class="stage-overlay" id="stage-overlay" hidden><span class="overlay-icon">${frameIcon}</span><strong>Ready when you are</strong><p>Start your camera or explore the demo scene.</p></div>
         <span class="stage-tag" id="stage-tag">DEMO / PENCIL STUDY</span>
+      </div>
+      <div class="effect-selector" role="group" aria-label="Visual effect">
+        <button type="button" data-effect="graphite" aria-pressed="true">Graphite</button>
+        <button type="button" data-effect="solarize" aria-pressed="false">Solarize</button>
+        <button type="button" data-effect="motion-glitch" aria-pressed="false">Motion Glitch</button>
       </div>
       <details class="sketch-adjustments" id="sketch-adjustments" open>
         <summary>Fine-tune the pencil</summary>
@@ -42,7 +49,7 @@ document.querySelector('#app').innerHTML = `
       <div class="telemetry"><span id="tracking-pill" class="tracking-pill" data-state="tracked"><span></span><span id="tracking-label">Simulated frame</span></span><span class="metrics"><span id="hands-count">4 simulated fingertips</span><span class="metric-divider">/</span><span id="fps">— fps</span></span></div>
       <div class="controls">
         <div class="source-controls"><button class="button primary" id="start-btn" type="button">${cameraIcon}<span>Start camera</span></button><button class="button stop-button" id="stop-btn" type="button" disabled><span class="stop-icon" aria-hidden="true"></span>Stop</button><button class="button demo-button" id="demo-btn" type="button" aria-pressed="true">Demo scene</button></div>
-        <div class="effect-controls"><label class="effect-switch" for="effect-toggle"><input type="checkbox" id="effect-toggle" checked><span class="switch-track" aria-hidden="true"></span><span>Pencil effect</span></label><span class="control-divider"></span><button class="button capture-button" id="capture-btn" type="button">${captureIcon}<span>Capture</span></button></div>
+        <div class="effect-controls"><label class="effect-switch" for="effect-toggle"><input type="checkbox" id="effect-toggle" checked><span class="switch-track" aria-hidden="true"></span><span>Effect on</span></label><span class="control-divider"></span><button class="button capture-button" id="capture-btn" type="button">${captureIcon}<span>Capture</span></button></div>
       </div>
     </section>
     <div class="message" id="message" role="status" aria-live="polite">Demo running. The frame gently moves, rotates, and resizes. Start your camera to try it with your hands.</div>
@@ -70,6 +77,7 @@ renderer.sketch.setParameters(graphiteControls.parameters);
 const stabilizer = new FrameStabilizer();
 const identities = new HandIdentityTracker();
 const tracker = new HandTracker();
+const frameMotion = new FrameMotion();
 let mode = 'idle';
 let stream = null;
 let sessionId = 0;
@@ -102,15 +110,18 @@ function refreshControls() {
   ui.dot.dataset.mode = mode;
   setText(ui.mode, mode === 'demo' ? 'Demo scene' : mode === 'camera' ? 'Live camera' : 'Camera stopped');
   setText(ui.note, mode === 'demo' ? 'SIMULATED FINGERTIPS' : mode === 'camera' ? 'MIRRORED / LOCAL PROCESSING' : 'READY TO EXPLORE');
-  setText(ui.tag, mode === 'demo' ? 'DEMO / NORMAL FRAME' : mode === 'camera' ? 'LIVE / PENCIL STUDY' : 'FINGERFRAME');
+  setText(ui.tag, mode === 'demo' ? `DEMO / ${EFFECT_LABELS[renderer.effects.selected].toUpperCase()} / NORMAL FRAME`
+    : mode === 'camera' ? `LIVE / ${EFFECT_LABELS[renderer.effects.selected].toUpperCase()}` : 'FINGERFRAME');
   ui.canvas.setAttribute('aria-label', mode === 'demo'
-    ? 'Animated demo with a pencil sketch inside the simulated finger frame'
-    : 'Mirrored webcam with a pencil sketch inside your four fingertip frame');
+    ? `Animated demo with ${EFFECT_LABELS[renderer.effects.selected]} inside the simulated finger frame`
+    : `Mirrored webcam with ${EFFECT_LABELS[renderer.effects.selected]} inside your four fingertip frame`);
 }
 
 function resetFrame() {
   stabilizer.reset();
   identities.reset();
+  frameMotion.reset();
+  renderer.effects.resetTemporal();
   tracker.resetVideo();
   trackingState = '';
   handCount = 0;
@@ -248,17 +259,17 @@ async function startCamera() {
 }
 
 function updateTrackingStatus(frame) {
-  const state = mode === 'demo' ? `demo:${frame.kind}:${frame.state}` : !trackingReady ? trackerStatus : `${frame.state}:${frame.reason}`;
+  const state = mode === 'demo' ? `demo:${frame.kind}:${frame.state}:${frame.regions.length}` : !trackingReady ? trackerStatus : `${frame.state}:${frame.reason}:${frame.regions.length}`;
   if (state !== trackingState) {
     trackingState = state;
     ui.pill.dataset.state = frame.state;
-    setText(ui.tracking, mode === 'demo' ? (frame.kind === 'bowtie' ? 'Simulated bowtie · both lobes' : 'Simulated frame') : !trackingReady
+    setText(ui.tracking, mode === 'demo' ? (frame.kind === 'bowtie' ? (frame.regions.length === 2 ? 'Simulated bowtie · both lobes' : 'Simulated bowtie · one visible lobe') : 'Simulated frame') : !trackingReady
       ? (trackerStatus === 'error' ? 'Tracker unavailable' : 'Loading hand tracker')
       : frame.state === 'tracked' ? (frame.kind === 'bowtie' ? 'Bowtie tracked' : 'Frame tracked')
         : frame.state === 'predicting' ? 'Briefly predicting hand motion' : frame.state === 'holding' ? 'Holding last frame' : frame.reason);
   }
   setText(ui.hands, mode === 'demo' ? '4 simulated fingertips' : `${handCount} / 2 hands`);
-  if (mode === 'demo') setText(ui.tag, `DEMO / ${demoPhase(demoTime).toUpperCase()}`);
+  if (mode === 'demo') setText(ui.tag, `DEMO / ${EFFECT_LABELS[renderer.effects.selected].toUpperCase()} / ${demoPhase(demoTime).toUpperCase()}`);
 }
 
 function render(timestamp) {
@@ -297,13 +308,14 @@ function render(timestamp) {
     stabilizer.update(fingertipsFromHands(hands), timestamp, ui.canvas.width, ui.canvas.height,
       { observedAt: hands.length === 2 ? Math.min(hands[0].lastSeen, hands[1].lastSeen) : -Infinity });
     const frame = stabilizer.snapshot(timestamp);
+    const motion = renderer.effects.selected === 'motion-glitch' && ui.effect.checked ? frameMotion.update(frame, timestamp) : ZERO_MOTION;
     try {
-      renderer.composite(frame, ui.effect.checked, true, hands);
+      renderer.composite(frame, ui.effect.checked, true, hands, { motion, timestamp });
     } catch (error) {
-      console.error('Sketch rendering failed:', error);
+      console.error('Effect rendering failed:', error);
       ui.effect.checked = false;
       renderer.composite(frame, false);
-      showError('The sketch filter could not process this image. Camera preview continues; try restarting or choose Demo scene.');
+      showError('The selected effect could not process this image. Preview continues; try toggling the effect or choose Demo scene.');
     }
     updateTrackingStatus(frame);
     frameCount++;
@@ -317,6 +329,20 @@ function render(timestamp) {
 }
 
 ui.start.addEventListener('click', startCamera);
+for (const button of document.querySelectorAll('[data-effect]')) {
+  button.addEventListener('click', () => {
+    if (!renderer.effects.select(button.dataset.effect)) return;
+    frameMotion.reset();
+    for (const option of document.querySelectorAll('[data-effect]')) option.setAttribute('aria-pressed', String(option.dataset.effect === renderer.effects.selected));
+    const adjustments = $('#sketch-adjustments');
+    adjustments.hidden = renderer.effects.selected !== 'graphite';
+    if (!adjustments.hidden) adjustments.open = true;
+    refreshControls();
+    setMessage(`${EFFECT_LABELS[renderer.effects.selected]} selected. ${renderer.effects.selected === 'graphite'
+      ? 'Three independent five-position controls retain your choices.'
+      : renderer.effects.selected === 'solarize' ? 'Anatomical bowtie lobes use warm and cool palettes.' : 'Move, rotate, or resize the frame to drive the distortion.'}`);
+  });
+}
 for (const [name, value] of Object.entries(graphiteControls.levels)) {
   const input = $(`#${name}`);
   input.value = String(value);
@@ -331,7 +357,9 @@ for (const [name, value] of Object.entries(graphiteControls.levels)) {
 ui.stop.addEventListener('click', () => stopCamera());
 ui.demo.addEventListener('click', startDemo);
 ui.effect.addEventListener('change', () => {
-  setMessage(ui.effect.checked ? 'Pencil effect on. Only the area inside the frame is processed.' : 'Pencil effect off. The frame remains visible over the original image.');
+  frameMotion.reset();
+  renderer.effects.resetTemporal();
+  setMessage(ui.effect.checked ? `${EFFECT_LABELS[renderer.effects.selected]} on. Only the area inside the frame is processed.` : 'Effect off. The frame remains visible over the original image.');
 });
 ui.capture.addEventListener('click', () => {
   ui.canvas.toBlob((blob) => {

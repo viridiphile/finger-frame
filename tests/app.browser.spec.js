@@ -83,6 +83,111 @@ test('compositing changes only pixels inside a rotated polygon and clears when d
   expect(result.restored).toBe(true);
 });
 
+test('a bowtie filters both lobes once, preserving the unframed side regions', async ({ page }) => {
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    const { Renderer } = await import('/src/renderer.js');
+    const { validateFrame } = await import('/src/frameGeometry.js');
+    const canvas = document.createElement('canvas');
+    const renderer = new Renderer(canvas);
+    renderer.resize(200, 200);
+    renderer.sourceContext.fillStyle = '#bd4932';
+    renderer.sourceContext.fillRect(0, 0, 200, 200);
+    const geometry = validateFrame([
+      { x: 180, y: 180, hand: 0, finger: 0 }, { x: 20, y: 20, hand: 0, finger: 1 },
+      { x: 20, y: 180, hand: 1, finger: 0 }, { x: 180, y: 20, hand: 1, finger: 1 },
+    ], 200, 200);
+    let processingCalls = 0;
+    const process = renderer.sketch.process.bind(renderer.sketch);
+    renderer.sketch.process = (...args) => { processingCalls++; return process(...args); };
+    renderer.composite({ ...geometry, opacity: 1, state: 'tracked' }, true, false);
+    const pixel = (x, y) => [...renderer.context.getImageData(x, y, 1, 1).data];
+    return { kind: geometry.kind, processingCalls, top: pixel(100, 50), bottom: pixel(100, 150), left: pixel(50, 100), right: pixel(150, 100) };
+  });
+  expect(result.kind).toBe('bowtie');
+  expect(result.processingCalls).toBe(1);
+  for (const pixel of [result.top, result.bottom]) {
+    expect(pixel[0]).toBe(pixel[1]);
+    expect(pixel[1]).toBe(pixel[2]);
+  }
+  expect(result.left).toEqual([189, 73, 50, 255]);
+  expect(result.right).toEqual([189, 73, 50, 255]);
+});
+
+test('sketch adjustments work and ordinary frames retain native processing detail', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#sketch-adjustments summary').click();
+  for (const name of ['sensitivity', 'lineIntensity', 'shadingIntensity']) {
+    await page.locator(`#${name}`).fill('40');
+    await expect(page.locator(`#${name}-value`)).toHaveText('40%');
+  }
+  const result = await page.evaluate(async () => {
+    const { PencilSketch } = await import('/src/effects.js');
+    const source = document.createElement('canvas');
+    source.width = 1280; source.height = 720;
+    const ctx = source.getContext('2d');
+    ctx.fillStyle = '#665d50'; ctx.fillRect(0, 0, 1280, 720);
+    const sketch = new PencilSketch();
+    const points = [{ x: 200, y: 100 }, { x: 800, y: 100 }, { x: 800, y: 450 }, { x: 200, y: 450 }];
+    sketch.process(source, points);
+    const width = sketch.canvas.width, height = sketch.canvas.height;
+    const gray = sketch.buffers.gray;
+    sketch.process(source, points.map((p) => ({ x: p.x + 1, y: p.y })));
+    return { width, height, reused: sketch.buffers.gray === gray };
+  });
+  expect(result.width).toBe(606);
+  expect(result.height).toBe(356);
+  expect(result.reused).toBe(true);
+});
+
+test('foreground mask restores source palm/finger pixels, feathers edges, and expires', async ({ page }) => {
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    const { Renderer } = await import('/src/renderer.js');
+    const canvas = document.createElement('canvas');
+    const renderer = new Renderer(canvas); renderer.resize(200, 200);
+    renderer.sourceContext.fillStyle = '#c5825e'; renderer.sourceContext.fillRect(0, 0, 200, 200);
+    const landmarks = [
+      [100,158],[83,139],[69,123],[56,107],[46,98],
+      [80,108],[76,86],[73,65],[72,46], [98,102],[98,77],[98,54],[98,35],
+      [116,108],[119,86],[121,65],[122,48], [131,122],[139,108],[143,94],[146,80],
+    ].map(([x,y]) => ({x,y}));
+    const frame = { polygon: [{x:20,y:20},{x:180,y:20},{x:180,y:180},{x:20,y:180}], opacity:1, state:'tracked' };
+    const hand = { landmarks, maskOpacity:1 };
+    renderer.composite(frame, true, false, [hand]);
+    const pixel = (x,y) => [...renderer.context.getImageData(x,y,1,1).data];
+    const palm = pixel(100,130), finger = pixel(98,55), background = pixel(165,45), outside = pixel(10,10);
+    const alpha = renderer.handMask.featherContext.getImageData(0,0,200,200).data;
+    let feathered = 0;
+    for (let i=3;i<alpha.length;i+=4) if(alpha[i]>0 && alpha[i]<255) feathered++;
+    renderer.composite(frame, true, false, [{ ...hand, maskOpacity:0 }]);
+    return { palm, finger, background, outside, feathered, expired:pixel(100,130) };
+  });
+  expect(result.palm).toEqual([197,130,94,255]);
+  // A narrow finger's feathered edge can contribute a fraction of a filtered
+  // pixel even at its center. Require the original color within rounding.
+  [197,130,94,255].forEach((value, channel) => expect(Math.abs(result.finger[channel] - value)).toBeLessThanOrEqual(2));
+  expect(result.outside).toEqual([197,130,94,255]);
+  expect(result.background[0]).toBe(result.background[1]);
+  expect(result.background[1]).toBe(result.background[2]);
+  expect(result.feathered).toBeGreaterThan(100);
+  expect(result.expired[0]).toBe(result.expired[1]);
+});
+
+test('the live demo shows both bowtie lobes, hand interchange, and the normal return', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#stage-tag')).toContainText('BOWTIE · TWO FILTERED LOBES', { timeout:15000 });
+  await expect(page.locator('#tracking-label')).toHaveText('Simulated bowtie · both lobes');
+  await page.screenshot({ path:'test-results/demo-bowtie.png', fullPage:true });
+  await expect(page.locator('#stage-tag')).toContainText('HAND INTERCHANGE', { timeout:10000 });
+  await expect(page.locator('#stage-tag')).toContainText('NORMAL FRAME · A IS NOW ON THE RIGHT', { timeout:15000 });
+  await expect(page.locator('#tracking-label')).toHaveText('Simulated frame');
+  await page.screenshot({ path:'test-results/demo-interchanged.png', fullPage:true });
+  await page.locator('#demo-btn').click();
+  await expect(page.locator('#stage-tag')).toHaveText('DEMO / NORMAL FRAME');
+  await expect(page.locator('#error-message')).toBeHidden();
+});
+
 test('denied camera permission gives a useful error and the demo remains usable', async ({ page }) => {
   await page.addInitScript(() => {
     navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Test permission denial', 'NotAllowedError'); };

@@ -1,17 +1,11 @@
-// All geometry uses the same mirrored canvas coordinates as the preview.
+import { extractHands, fingertipsFromHands } from './handAssociation.js';
+
+const crossVector = (a, b) => a.x * b.y - a.y * b.x;
+const subtract = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-const cross = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-const copyPoints = (points) => points.map((point) => ({ ...point }));
 
 export function extractFingertips(result, width, height) {
-  if (result?.landmarks?.length !== 2) return null;
-  const points = result.landmarks.flatMap((hand, handId) =>
-    [4, 8].map((landmark, finger) => {
-      const point = hand[landmark];
-      return { x: (1 - point?.x) * width, y: point?.y * height, hand: handId, finger };
-    }),
-  );
-  return points.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y)) ? points : null;
+  return fingertipsFromHands(extractHands(result, width, height).map((hand, id) => ({ ...hand, id })));
 }
 
 export function polygonArea(points) {
@@ -21,117 +15,117 @@ export function polygonArea(points) {
   }, 0)) / 2;
 }
 
-// A convex hull avoids self-intersection, and rejects a fingertip inside the
-// other three. Unlike sorting by screen x, it works at every frame rotation.
-export function convexHull(points) {
-  const sorted = [...points].sort((a, b) => a.x - b.x || a.y - b.y);
-  const half = (list) => {
-    const hull = [];
-    for (const point of list) {
-      while (hull.length >= 2 && cross(hull.at(-2), hull.at(-1), point) <= 0) hull.pop();
-      hull.push(point);
-    }
-    return hull.slice(0, -1);
-  };
-  return [...half(sorted), ...half([...sorted].reverse())];
+// A + t(B-A) = C + u(D-C). Parallel/collinear segments need a separate
+// branch: division by a tiny determinant must never create a distant corner.
+export function segmentIntersection(a, b, c, d, epsilon = 1e-8) {
+  if (![a, b, c, d].every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))) return null;
+  const r = subtract(b, a), s = subtract(d, c), q = subtract(c, a);
+  const rr = r.x * r.x + r.y * r.y, ss = s.x * s.x + s.y * s.y;
+  if (rr < epsilon || ss < epsilon) return null;
+  const denominator = crossVector(r, s);
+  if (Math.abs(denominator) <= epsilon * Math.sqrt(rr * ss)) {
+    if (Math.abs(crossVector(q, r)) > epsilon * Math.sqrt(rr) * Math.max(1, Math.hypot(q.x, q.y))) return null;
+    const start = (q.x * r.x + q.y * r.y) / rr;
+    const end = start + (s.x * r.x + s.y * r.y) / rr;
+    const low = Math.max(0, Math.min(start, end)), high = Math.min(1, Math.max(start, end));
+    if (high < low - epsilon) return null;
+    return { kind: high - low > epsilon ? 'overlap' : 'touch', x: a.x + low * r.x, y: a.y + low * r.y };
+  }
+  const t = crossVector(q, s) / denominator, u = crossVector(q, r) / denominator;
+  if (t < -epsilon || t > 1 + epsilon || u < -epsilon || u > 1 + epsilon) return null;
+  const proper = t > epsilon && t < 1 - epsilon && u > epsilon && u < 1 - epsilon;
+  return { kind: proper ? 'crossing' : 'touch', x: a.x + t * r.x, y: a.y + t * r.y, t, u };
+}
+
+export function anatomicalPolygon(points) {
+  if (!points || points.length !== 4) return null;
+  const get = (hand, finger) => points.find((p) => p.hand === hand && p.finger === finger);
+  // Fixed connections, including when A passes to the right of B.
+  const polygon = [get(0, 1), get(1, 1), get(1, 0), get(0, 0)];
+  return polygon.every(Boolean) ? polygon : null;
 }
 
 export function validateFrame(points, width, height) {
-  const invalid = (reason) => ({ valid: false, reason, polygon: null });
-  if (!points || points.length !== 4 || width <= 0 || height <= 0) return invalid('Show both hands');
-  if (!points.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)
+  const invalid = (reason) => ({ valid: false, reason, polygon: null, regions: [], kind: null, intersection: null });
+  if (width <= 0 || height <= 0) return invalid('Show both hands');
+  const polygon = anatomicalPolygon(points);
+  if (!polygon) return invalid('Show both hands');
+  if (!polygon.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)
     && p.x >= 0 && p.x <= width && p.y >= 0 && p.y <= height)) return invalid('Keep all four fingertips in view');
-  // Each hand must supply one thumb and one index; missing identities are invalid.
-  const ids = new Set(points.map((p) => `${p.hand}:${p.finger}`));
-  if (![0, 1].every((hand) => [0, 1].every((finger) => ids.has(`${hand}:${finger}`)))) return invalid('Show both hands');
-  const polygon = convexHull(points);
-  if (polygon.length !== 4) return invalid('Uncross and spread your fingers');
-  const area = polygonArea(polygon);
-  if (area < width * height * 0.012) return invalid('Make a larger frame');
-  const minEdge = Math.min(width, height) * 0.045;
+  const minimumDistance = Math.min(width, height) * 0.02;
   for (let i = 0; i < 4; i++) {
-    const a = polygon[i], b = polygon[(i + 1) % 4], c = polygon[(i + 2) % 4];
-    const ab = distance(a, b), bc = distance(b, c);
-    if (ab < minEdge) return invalid('Spread your fingertips apart');
-    if (Math.abs(cross(a, b, c)) / (ab * bc) < 0.12) return invalid('Open the frame a little wider');
-    // A hand's thumb and index should form a boundary edge, not a diagonal.
-    const partner = polygon.findIndex((p) => p.hand === a.hand && p.finger !== a.finger);
-    if ((partner - i + 4) % 4 === 2) return invalid('Uncross your hands');
+    for (let j = i + 1; j < 4; j++) {
+      if (distance(polygon[i], polygon[j]) < minimumDistance) return invalid('Spread your fingertips apart');
+    }
   }
-  return { valid: true, reason: 'Frame tracked', polygon };
+  const [a, b, c, d] = polygon;
+  const first = segmentIntersection(a, b, c, d);
+  const second = segmentIntersection(b, c, d, a);
+  if ([first, second].some((hit) => hit && hit.kind !== 'crossing')) return invalid('Open the frame a little wider');
+  if (first && second) return invalid('Open the frame a little wider');
+  const hit = first || second;
+  let regions;
+  if (hit) {
+    const intersection = { x: hit.x, y: hit.y };
+    regions = first ? [[a, intersection, d], [b, c, intersection]] : [[a, b, intersection], [c, d, intersection]];
+    const areas = regions.map(polygonArea);
+    if (Math.min(...areas) < width * height * 0.001 || areas[0] + areas[1] < width * height * 0.008) {
+      return invalid('Open both bowtie lobes a little wider');
+    }
+    return { valid: true, reason: 'Bowtie tracked', polygon, regions, kind: 'bowtie', intersection, area: areas[0] + areas[1] };
+  }
+  const area = polygonArea(polygon);
+  if (area < width * height * 0.008) return invalid('Make a larger frame');
+  for (let i = 0; i < 4; i++) {
+    const previous = polygon[(i + 3) % 4], point = polygon[i], next = polygon[(i + 1) % 4];
+    const sine = Math.abs(crossVector(subtract(previous, point), subtract(next, point)))
+      / (distance(previous, point) * distance(next, point));
+    if (sine < 0.015) return invalid('Open the frame a little wider');
+  }
+  return { valid: true, reason: 'Frame tracked', polygon, regions: [polygon], kind: 'quadrilateral', intersection: null, area };
 }
 
 export class FrameStabilizer {
-  constructor({ smoothingMs = 75, holdMs = 220, fadeMs = 160 } = {}) {
-    this.smoothingMs = smoothingMs;
+  constructor({ holdMs = 220, fadeMs = 180 } = {}) {
     this.holdMs = holdMs;
     this.fadeMs = fadeMs;
     this.reset();
   }
 
   reset() {
-    this.points = null;
+    this.geometry = null;
     this.lastValid = -Infinity;
-    this.lastUpdate = null;
     this.acquiredAt = null;
     this.reason = 'Show both hands';
     this.measurementValid = false;
   }
 
-  update(points, timestamp, width, height) {
-    // Expire old identities before reacquiring a gesture in a new position.
-    if (timestamp - this.lastValid >= this.holdMs + this.fadeMs) this.points = null;
+  // Coordinates have already been smoothed/predicted by HandIdentityTracker.
+  // observedAt is the older hand's real observation timestamp: predicting or
+  // redrawing a stale pose must not extend its lifetime indefinitely.
+  update(points, timestamp, width, height, { observedAt = timestamp } = {}) {
     const validation = validateFrame(points, width, height);
-    this.measurementValid = false;
-    this.reason = validation.reason;
-    if (!validation.valid) return this.snapshot(timestamp);
-    let next = copyPoints(points);
-    if (this.points) {
-      // MediaPipe's result array can change hand order. Compare the two possible
-      // hand assignments, keeping thumb/index identity within each hand.
-      const cost = (swapped) => next.reduce((sum, p) => {
-        const previous = this.points.find((old) => old.hand === (swapped ? 1 - p.hand : p.hand) && old.finger === p.finger);
-        return sum + distance(p, previous) ** 2;
-      }, 0);
-      if (cost(true) < cost(false)) next = next.map((p) => ({ ...p, hand: 1 - p.hand }));
-      const largestJump = Math.max(...next.map((p) => distance(p, this.points.find((old) => old.hand === p.hand && old.finger === p.finger))));
-      if (largestJump > Math.hypot(width, height) * 0.23) {
-        this.reason = 'Reacquiring frame';
-        return this.snapshot(timestamp);
-      }
-      const elapsed = Math.min(100, Math.max(1, timestamp - this.lastUpdate));
-      const alpha = 1 - Math.exp(-elapsed / this.smoothingMs);
-      next = next.map((p) => {
-        const old = this.points.find((previous) => previous.hand === p.hand && previous.finger === p.finger);
-        return { ...p, x: old.x + alpha * (p.x - old.x), y: old.y + alpha * (p.y - old.y) };
-      });
-      const smoothedValidation = validateFrame(next, width, height);
-      if (!smoothedValidation.valid) {
-        this.reason = 'Reacquiring frame';
-        return this.snapshot(timestamp);
-      }
-    } else {
-      this.acquiredAt = timestamp;
+    this.measurementValid = validation.valid;
+    this.reason = validation.valid && timestamp - observedAt > 150 ? 'Show both hands' : validation.reason;
+    if (validation.valid && timestamp - observedAt < this.holdMs + this.fadeMs) {
+      if (!this.geometry || timestamp - this.lastValid >= this.holdMs + this.fadeMs) this.acquiredAt = timestamp;
+      this.geometry = validation;
+      this.lastValid = Math.max(this.lastValid, observedAt);
     }
-    this.points = next;
-    this.lastValid = timestamp;
-    this.lastUpdate = timestamp;
-    this.measurementValid = true;
     return this.snapshot(timestamp);
   }
 
   snapshot(timestamp) {
-    const age = timestamp - this.lastValid;
-    if (!this.points || age >= this.holdMs + this.fadeMs) {
-      return { polygon: null, opacity: 0, state: 'searching', reason: this.reason };
+    const age = Math.max(0, timestamp - this.lastValid);
+    if (!this.geometry || age >= this.holdMs + this.fadeMs) {
+      return { polygon: null, regions: [], opacity: 0, state: 'searching', reason: this.reason, kind: null };
     }
     const fadeOut = age <= this.holdMs ? 1 : 1 - (age - this.holdMs) / this.fadeMs;
     const fadeIn = Math.min(1, Math.max(0, (timestamp - this.acquiredAt) / 100));
     return {
-      polygon: convexHull(this.points),
+      ...this.geometry, reason: this.reason,
       opacity: Math.min(fadeIn, fadeOut),
-      state: this.measurementValid && age < 120 ? 'tracked' : 'holding',
-      reason: this.reason,
+      state: this.measurementValid && age <= 80 ? 'tracked' : age <= 150 && this.measurementValid ? 'predicting' : 'holding',
     };
   }
 }

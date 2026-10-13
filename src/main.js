@@ -1,9 +1,11 @@
 
 import './style.css';
-import { FrameStabilizer, extractFingertips } from './frameGeometry.js';
+import { FrameStabilizer } from './frameGeometry.js';
+import { HandIdentityTracker, extractHands, fingertipsFromHands } from './handAssociation.js';
 import { HandTracker } from './handTracking.js';
 import { Renderer } from './renderer.js';
-import { drawDemoScene, demoFingertips } from './demo.js';
+import { drawDemoScene, drawDemoHands, demoHands, demoPhase } from './demo.js';
+import { SKETCH_DEFAULTS } from './effects.js';
 
 const icon = (content) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${content}</svg>`;
 const cameraIcon = icon('<rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 10 5-3v10l-5-3"/>');
@@ -29,6 +31,14 @@ document.querySelector('#app').innerHTML = `
         <div class="stage-overlay" id="stage-overlay" hidden><span class="overlay-icon">${frameIcon}</span><strong>Ready when you are</strong><p>Start your camera or explore the demo scene.</p></div>
         <span class="stage-tag" id="stage-tag">DEMO / PENCIL STUDY</span>
       </div>
+      <details class="sketch-adjustments" id="sketch-adjustments">
+        <summary>Fine-tune the pencil</summary>
+        <div class="adjustment-grid">
+          <label for="sensitivity">Edge sensitivity <output id="sensitivity-value" for="sensitivity">62%</output><input id="sensitivity" type="range" min="0" max="100" value="62"></label>
+          <label for="lineIntensity">Line intensity <output id="lineIntensity-value" for="lineIntensity">78%</output><input id="lineIntensity" type="range" min="0" max="100" value="78"></label>
+          <label for="shadingIntensity">Shading intensity <output id="shadingIntensity-value" for="shadingIntensity">28%</output><input id="shadingIntensity" type="range" min="0" max="100" value="28"></label>
+        </div>
+      </details>
       <div class="telemetry"><span id="tracking-pill" class="tracking-pill" data-state="tracked"><span></span><span id="tracking-label">Simulated frame</span></span><span class="metrics"><span id="hands-count">4 simulated fingertips</span><span class="metric-divider">/</span><span id="fps">— fps</span></span></div>
       <div class="controls">
         <div class="source-controls"><button class="button primary" id="start-btn" type="button">${cameraIcon}<span>Start camera</span></button><button class="button stop-button" id="stop-btn" type="button" disabled><span class="stop-icon" aria-hidden="true"></span>Stop</button><button class="button demo-button" id="demo-btn" type="button" aria-pressed="true">Demo scene</button></div>
@@ -56,6 +66,7 @@ const ui = {
 };
 const renderer = new Renderer(ui.canvas);
 const stabilizer = new FrameStabilizer();
+const identities = new HandIdentityTracker();
 const tracker = new HandTracker();
 let mode = 'idle';
 let stream = null;
@@ -69,6 +80,8 @@ let lastStats = 0;
 let frameCount = 0;
 let handCount = 0;
 let trackingState = '';
+let demoStartedAt = 0;
+let demoTime = 0;
 
 function setText(element, value) {
   if (element.textContent !== value) element.textContent = value;
@@ -87,7 +100,7 @@ function refreshControls() {
   ui.dot.dataset.mode = mode;
   setText(ui.mode, mode === 'demo' ? 'Demo scene' : mode === 'camera' ? 'Live camera' : 'Camera stopped');
   setText(ui.note, mode === 'demo' ? 'SIMULATED FINGERTIPS' : mode === 'camera' ? 'MIRRORED / LOCAL PROCESSING' : 'READY TO EXPLORE');
-  setText(ui.tag, mode === 'demo' ? 'DEMO / PENCIL STUDY' : mode === 'camera' ? 'LIVE / PENCIL STUDY' : 'FINGERFRAME');
+  setText(ui.tag, mode === 'demo' ? 'DEMO / NORMAL FRAME' : mode === 'camera' ? 'LIVE / PENCIL STUDY' : 'FINGERFRAME');
   ui.canvas.setAttribute('aria-label', mode === 'demo'
     ? 'Animated demo with a pencil sketch inside the simulated finger frame'
     : 'Mirrored webcam with a pencil sketch inside your four fingertip frame');
@@ -95,6 +108,7 @@ function refreshControls() {
 
 function resetFrame() {
   stabilizer.reset();
+  identities.reset();
   tracker.resetVideo();
   trackingState = '';
   handCount = 0;
@@ -124,10 +138,11 @@ function startDemo() {
   releaseCamera();
   clearError();
   mode = 'demo';
+  demoStartedAt = performance.now();
   renderer.resize(960, 600);
   resetFrame();
   refreshControls();
-  setMessage('Demo running. The frame gently moves, rotates, and resizes. Start your camera to try it with your hands.');
+  setMessage('Demo: normal frame → bowtie → hand interchange → normal frame. A and B keep their identities. The cycle takes 32 seconds; Start camera to try it yourself.');
   startLoop();
 }
 
@@ -231,15 +246,17 @@ async function startCamera() {
 }
 
 function updateTrackingStatus(frame) {
-  const state = mode === 'demo' ? 'demo' : !trackingReady ? trackerStatus : `${frame.state}:${frame.reason}`;
+  const state = mode === 'demo' ? `demo:${frame.kind}:${frame.state}` : !trackingReady ? trackerStatus : `${frame.state}:${frame.reason}`;
   if (state !== trackingState) {
     trackingState = state;
-    ui.pill.dataset.state = mode === 'demo' ? 'tracked' : frame.state;
-    setText(ui.tracking, mode === 'demo' ? 'Simulated frame' : !trackingReady
+    ui.pill.dataset.state = frame.state;
+    setText(ui.tracking, mode === 'demo' ? (frame.kind === 'bowtie' ? 'Simulated bowtie · both lobes' : 'Simulated frame') : !trackingReady
       ? (trackerStatus === 'error' ? 'Tracker unavailable' : 'Loading hand tracker')
-      : frame.state === 'tracked' ? 'Frame tracked' : frame.state === 'holding' ? 'Holding last frame' : frame.reason);
+      : frame.state === 'tracked' ? (frame.kind === 'bowtie' ? 'Bowtie tracked' : 'Frame tracked')
+        : frame.state === 'predicting' ? 'Briefly predicting hand motion' : frame.state === 'holding' ? 'Holding last frame' : frame.reason);
   }
   setText(ui.hands, mode === 'demo' ? '4 simulated fingertips' : `${handCount} / 2 hands`);
+  if (mode === 'demo') setText(ui.tag, `DEMO / ${demoPhase(demoTime).toUpperCase()}`);
 }
 
 function render(timestamp) {
@@ -247,9 +264,13 @@ function render(timestamp) {
   if (mode === 'idle') return;
   if (!document.hidden && timestamp - lastRender >= 1000 / 30 - 1) {
     lastRender = timestamp;
+    let hands = [];
     if (mode === 'demo') {
-      drawDemoScene(renderer.sourceContext, ui.canvas.width, ui.canvas.height, timestamp);
-      stabilizer.update(demoFingertips(ui.canvas.width, ui.canvas.height, timestamp), timestamp, ui.canvas.width, ui.canvas.height);
+      demoTime = timestamp - demoStartedAt;
+      drawDemoScene(renderer.sourceContext, ui.canvas.width, ui.canvas.height, demoTime);
+      const simulated = demoHands(ui.canvas.width, ui.canvas.height, demoTime);
+      drawDemoHands(renderer.sourceContext, simulated, ui.canvas.width, ui.canvas.height);
+      identities.update(simulated, timestamp, ui.canvas.width, ui.canvas.height);
     } else if (ui.video.readyState >= 2) {
       renderer.drawCamera(ui.video);
       if (trackingReady) {
@@ -257,21 +278,25 @@ function render(timestamp) {
           const result = tracker.detect(ui.video, timestamp);
           if (result !== undefined) {
             handCount = result.landmarks.length;
-            stabilizer.update(extractFingertips(result, ui.canvas.width, ui.canvas.height), timestamp, ui.canvas.width, ui.canvas.height);
+            identities.update(extractHands(result, ui.canvas.width, ui.canvas.height), timestamp, ui.canvas.width, ui.canvas.height);
           }
         } catch (error) {
           console.error('Hand detection failed:', error);
           trackingReady = false;
           trackerStatus = 'error';
           stabilizer.reset();
+          identities.reset();
           tracker.close();
           showError('Hand detection stopped. Stop and restart the camera to retry, or use Demo scene.');
         }
       }
     }
+    hands = identities.snapshot(timestamp);
+    stabilizer.update(fingertipsFromHands(hands), timestamp, ui.canvas.width, ui.canvas.height,
+      { observedAt: hands.length === 2 ? Math.min(hands[0].lastSeen, hands[1].lastSeen) : -Infinity });
     const frame = stabilizer.snapshot(timestamp);
     try {
-      renderer.composite(frame, ui.effect.checked);
+      renderer.composite(frame, ui.effect.checked, true, hands);
     } catch (error) {
       console.error('Sketch rendering failed:', error);
       ui.effect.checked = false;
@@ -290,6 +315,15 @@ function render(timestamp) {
 }
 
 ui.start.addEventListener('click', startCamera);
+for (const [name, value] of Object.entries(SKETCH_DEFAULTS)) {
+  const input = $(`#${name}`);
+  input.value = String(Math.round(value * 100));
+  input.addEventListener('input', () => {
+    const numeric = Number(input.value);
+    renderer.sketch.setParameters({ [name]: numeric / 100 });
+    setText($(`#${name}-value`), `${numeric}%`);
+  });
+}
 ui.stop.addEventListener('click', () => stopCamera());
 ui.demo.addEventListener('click', startDemo);
 ui.effect.addEventListener('change', () => {
@@ -318,7 +352,11 @@ window.addEventListener('pagehide', () => {
   tracker.close();
 });
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) resetFrame();
+  if (!document.hidden) {
+    resetFrame();
+    // Keep a tab return continuous rather than advancing through unseen phases.
+    if (mode === 'demo') demoStartedAt = performance.now() - demoTime;
+  }
 });
 
 startDemo();

@@ -1,9 +1,14 @@
 import { PencilSketch } from './effects.js';
+import { ForegroundHandMask } from './handMask.js';
 
 export function polygonPath(context, points) {
   context.beginPath();
+  appendPolygonPath(context, points);
+}
+
+function appendPolygonPath(context, points) {
   context.moveTo(points[0].x, points[0].y);
-  for (const point of points.slice(1)) context.lineTo(point.x, point.y);
+  for (let i = 1; i < points.length; i++) context.lineTo(points[i].x, points[i].y);
   context.closePath();
 }
 
@@ -14,6 +19,7 @@ export class Renderer {
     this.source = document.createElement('canvas');
     this.sourceContext = this.source.getContext('2d');
     this.sketch = new PencilSketch();
+    this.handMask = new ForegroundHandMask();
     this.resize(960, 600);
   }
 
@@ -31,19 +37,27 @@ export class Renderer {
     ctx.restore();
   }
 
-  composite(frame, effectEnabled, showOutline = true) {
+  composite(frame, effectEnabled, showOutline = true, hands = []) {
     const ctx = this.context;
     const { width, height } = this.canvas;
     // Always redraw the original source: disabling the effect leaves no residue.
     ctx.drawImage(this.source, 0, 0, width, height);
     if (!frame.polygon || frame.opacity <= 0) return;
     if (effectEnabled) {
-      const sketch = this.sketch.process(this.source);
+      const sketch = this.sketch.process(this.source, frame.polygon);
       ctx.save();
-      polygonPath(ctx, frame.polygon);
-      ctx.clip();
+      ctx.beginPath();
+      for (const region of frame.regions ?? [frame.polygon]) appendPolygonPath(ctx, region);
+      // One compound clip and one image draw for both lobes: same pixels,
+      // same alpha, and no repeated filter work at the shared crossing.
+      ctx.clip('evenodd');
       ctx.globalAlpha = frame.opacity;
-      ctx.drawImage(sketch, 0, 0, width, height);
+      const bounds = this.sketch.bounds;
+      ctx.drawImage(sketch, bounds.x, bounds.y, bounds.width, bounds.height);
+      // Restore actual source pixels, not a painted skin color. The current
+      // polygon clip also confines feathering so outside pixels stay exact.
+      ctx.globalAlpha = 1;
+      this.handMask.restore(ctx, this.source, hands);
       ctx.restore();
     }
     if (showOutline) this.drawOutline(frame);
@@ -58,9 +72,9 @@ export class Renderer {
     ctx.strokeStyle = 'rgba(18, 38, 30, .55)';
     ctx.lineWidth = 4 * unit;
     ctx.stroke();
-    ctx.strokeStyle = frame.state === 'holding' ? '#f5c578' : '#c4f6d3';
+    ctx.strokeStyle = frame.state === 'holding' || frame.state === 'predicting' ? '#f5c578' : '#c4f6d3';
     ctx.lineWidth = 1.7 * unit;
-    if (frame.state === 'holding') ctx.setLineDash([6 * unit, 5 * unit]);
+    if (frame.state === 'holding' || frame.state === 'predicting') ctx.setLineDash([6 * unit, 5 * unit]);
     ctx.stroke();
     ctx.setLineDash([]);
     for (const point of frame.polygon) {

@@ -1,6 +1,6 @@
-# FingerFrame
+# FingerFrame — iteration 2
 
-A browser multimedia project: make a window with the thumbs and index fingers of both hands, and a live pencil drawing appears inside it. The rest of the mirrored camera image stays in color. An animated demo is available immediately, without a camera or model initialization.
+A browser multimedia project: make a window with the thumbs and index fingers of both hands, and a live graphite drawing appears inside it. Turn a hand to create a bowtie with two filtered lobes, or interchange the hands while preserving their anatomical connections. Original hand pixels stay in front of the sketch. An animated demo is available immediately, without camera permission or model initialization.
 
 The original Vite + vanilla JavaScript project is retained. No backend, paid API, image generator, or video upload is used. Camera pixels and hand inference stay on your device.
 
@@ -26,12 +26,13 @@ npm run setup:model
 
 ## Use the application
 
-1. The **Demo scene** starts automatically. Four simulated fingertips move, rotate, and resize a frame over an animated illustration.
+1. The **Demo scene** starts automatically. Its 32-second loop shows a normal frame, a bowtie with both lobes filtered, hand interchange, a normal frame with A now on the right, and a return. The existing illustration remains behind simulated hands labeled A/B.
 2. Click **Start camera**, allow browser access, and wait for the hand tracker to load. The demo continues while permission is pending; **Stop** can cancel startup.
-3. Hold both hands in front of the camera, palms facing it. Spread the thumb and index finger of each hand into an open L. Together, the four tips should surround a clear, convex window. Keep all fingertips visible and a little apart; they do not have to touch.
-4. Move and rotate the window. Look for **Frame tracked**, a green outline, and four corner markers. Amber/dashed means the last frame is briefly held during uncertain detection.
+3. Hold both hands in front of the camera, palms facing it. Spread the thumb and index finger of each hand into an open L. Start with a clear window and four separated tips. Keep all fingertips visible; they do not have to touch.
+4. Move, rotate and resize the window. Then rotate one hand so the anatomical connections cross: look for **Bowtie tracked** and two filtered triangles. Interchange hand positions and return to the normal pose. Amber/dashed indicates brief prediction or holding during uncertain detection.
 5. **Pencil effect** turns the image processing on/off while keeping the outline visible. **Capture** downloads the displayed canvas as a PNG, including its outline. UI badges are outside the exported canvas.
 6. **Stop** releases the camera and clears the preview. **Demo scene** also releases the camera and returns to the simulation. Starting again reuses an already loaded model.
+7. Open **Fine-tune the pencil** to adjust edge sensitivity (62% default), line intensity (78%), and shading intensity (28%). Fine contours, tonal shading and faint hatching are separate from the original hand restoration.
 
 Camera failures show specific recovery messages for denied permission, no camera, a busy device, an insecure page, or interrupted startup. On macOS, also check System Settings → Privacy & Security → Camera for your browser if permission is blocked. To retry a tracker failure, stop and restart; the demo remains available.
 
@@ -43,9 +44,9 @@ npm run build
 npm run test:browser
 ```
 
-- `npm test`: Node's built-in runner; 14 tests for mirrored coordinates, validation, rotation, hand-order swaps, smoothing, dropout timing, jump rejection, demo motion, and the actual sketch pixel algorithm.
+- `npm test`: Node's built-in runner; 32 tests for hand association, anatomical/bowtie geometry, occlusion prediction, hand silhouettes, demo motion and the actual sketch pixel algorithm.
 - `npm run build`: produces a static application in `dist/`, including the local model and WASM runtime.
-- `npm run test:browser`: builds first, then runs five Playwright checks in headless Chrome/Chromium. It starts and stops development and production-preview servers on ports 4173 and 4174; keep both free. The production check verifies packaged model/WASM loading and camera behavior. On this Mac it uses installed Google Chrome. On other systems, run `npx playwright install chromium` first, or set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to a Chromium executable.
+- `npm run test:browser`: builds first, then runs nine Playwright checks in headless Chrome/Chromium, including the real-time bowtie/interchange demo cycle. It starts and stops development and production-preview servers on ports 4173 and 4174; keep both free. The production check verifies packaged model/WASM loading and synthetic camera behavior. On this Mac it uses installed Google Chrome. On other systems, run `npx playwright install chromium` first, or set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to a Chromium executable.
 
 To view the production build:
 
@@ -57,36 +58,28 @@ Open the Local URL printed by Vite. `preview` serves an existing `dist/`; rebuil
 
 ## Verification and limitations
 
-The build, all 14 algorithm tests, and all five browser checks passed during implementation. Browser checks covered an animated demo, exact pixel preservation outside a rotated clipping polygon, effect toggling, PNG signature/dimensions, a 375px mobile viewport, permission denial, late permission cancellation, mirrored synthetic video, real local model initialization/inference from the production build, camera restart, and track release. The production demo reported 30fps after settling in headless Chrome; this is a demo observation, not a physical-camera benchmark.
+The build, all 32 algorithm tests, and all nine browser checks passed during implementation. The browser checks covered both filtered bowtie lobes with one processing call, exact outside-polygon pixels, native cropped processing, adjustment controls, feathered foreground restoration and its expiration, the actual demo interchange/return, effect toggling, PNG bytes/dimensions, a 375px mobile layout, permission denial/cancellation, mirrored synthetic video, real local model inference in the production build, restart, and track release. Desktop, mobile, bowtie and interchanged demo screenshots were inspected. The production demo reported 30fps after settling in headless Chrome; this is a demo observation, not a physical-camera benchmark.
 
-**Physical webcam two-hand tracking has not been tested.** The browser camera tests use a generated `Canvas.captureStream()` video; they do not establish accuracy on real hands or frame rate on the physical camera. Safari, Firefox, CPU fallback, hardware unplugging, and a classroom presentation still need manual verification. See [MANUAL_TESTING.md](MANUAL_TESTING.md).
+**Physical webcam two-hand tracking and visual mask quality have not been tested.** Tests use simulated landmarks and a generated `Canvas.captureStream()` video; they do not establish real-hand identity accuracy, true skin-boundary masks, facial detail quality or physical-camera frame rate. Safari, Firefox, CPU fallback, hardware unplugging, and a classroom presentation still need manual verification. See [MANUAL_TESTING.md](MANUAL_TESTING.md).
 
-Crossed/overlapping fingers, very small frames, poor lighting, occlusion, and fast motion can interrupt tracking. The effect holds for 220ms, fades for 160ms, then disappears. It reacquires automatically once a valid gesture returns. Processing aims at an interactive rate, with a 30fps render cap, inference capped at 20Hz, and reduced resolution; these are scheduling limits, not a guarantee of measured frame rate.
+Anatomical crossings are supported. Entirely collapsed frames, ambiguous complete hand overlap, poor lighting and fast motion can still interrupt tracking. Translation prediction is capped at 150ms; the frame holds until 220ms and fades for 180ms, then disappears. Stale silhouettes fade sooner to avoid restoring background. Processing aims at an interactive rate, with a 30fps render cap, inference capped at 20Hz, and native cropped sketch processing with a 1024px maximum; these are scheduling limits, not guarantees of camera throughput.
 
-## Files
+## Files changed in iteration 2
 
 | File | Purpose |
 | --- | --- |
-| `src/main.js` (modified) | UI, camera lifecycle, application state, render scheduling, screenshot download |
-| `src/style.css` (modified) | Responsive studio layout and controls |
-| `src/handTracking.js` (new) | Lazy MediaPipe loading, GPU/CPU initialization, reduced-size inference |
-| `src/frameGeometry.js` (new) | Fingertip conversion, convex quadrilateral validation, matching, EMA and loss handling |
-| `src/effects.js` (new) | Grayscale, blur, color dodge, Sobel contours and pencil shading |
-| `src/renderer.js` (new) | Mirrored source canvas, polygon clipping, sketch composition, outline |
-| `src/demo.js` (new) | Animated illustration and simulated fingertip coordinates |
-| `index.html`, `public/favicon.svg` (modified) | App metadata and frame icon |
-| `package.json`, `package-lock.json` (modified) | MediaPipe/Playwright dependencies and run/check scripts |
-| `.gitignore` (modified) | Generated runtime assets and test output exclusions |
-| `scripts/model-info.mjs` (new) | Pinned model URL, local path and checksum |
-| `scripts/prepare-assets.mjs` (new) | Model verification and matching local WASM copying |
-| `scripts/download-model.mjs` (new) | Optional verified model recovery download |
-| `public/mediapipe/hand_landmarker.task` (new) | Google Hand Landmarker model, served locally |
-| `public/mediapipe/wasm/*` (generated) | Six package-matched WASM/JS files; generated before dev/build |
-| `tests/frameGeometry.test.js`, `tests/effects.test.js` (new) | Algorithm regression tests |
-| `tests/app.browser.spec.js`, `playwright.config.js` (new) | Browser checks and test server configuration |
-| `README.md`, `TECHNICAL_EXPLANATION.md`, `MANUAL_TESTING.md`, `public/mediapipe/README.md` (new) | Running, algorithms, verification checklist and asset provenance |
+| `src/handAssociation.js` (new) | Persistent A/B identity, wrist/palm/handedness association, adaptive EMA and capped prediction |
+| `src/handMask.js` (new) | Palm/finger silhouettes, feathering and original-pixel restoration |
+| `src/frameGeometry.js` (modified) | Anatomical ordering, robust segment intersections, bowtie lobes and observation-based expiry |
+| `src/effects.js` (modified) | Native cropped graphite processing, Scharr, edge thinning and adaptive thresholds |
+| `src/renderer.js` (modified) | Single compound clip/draw and foreground restoration before the outline |
+| `src/demo.js` (modified) | Existing scene plus simulated 21-point hands, bowtie and interchange cycle |
+| `src/main.js`, `src/style.css` (modified) | Pipeline integration, phase/status text and three sketch controls, preserving the landing-page design |
+| `tests/handAssociation.test.js`, `tests/handMask.test.js`, `tests/demo.test.js` (new) | Identity, masking and full-cycle regression tests |
+| `tests/frameGeometry.test.js`, `tests/effects.test.js`, `tests/app.browser.spec.js` (modified) | Geometry, graphite and browser regressions |
+| `README.md`, `TECHNICAL_EXPLANATION.md`, `MANUAL_TESTING.md` (modified) | Running, algorithms, references, verification and presentation checklist |
 
-Unused original starter assets were retained. Screenshots generated by browser checks are in the ignored `test-results/` directory.
+The existing camera adapter, Vite setup, dependencies, local model/WASM preparation, favicon and starter assets are retained. No dependencies were added. Generated screenshots are in ignored `test-results/`; `dist/`, `node_modules/` and generated WASM files remain excluded from Git.
 
 ## References
 

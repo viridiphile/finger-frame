@@ -1,130 +1,168 @@
-# Technical explanation — FingerFrame
+# FingerFrame — iteration 2 technical explanation
 
-## Technologies and model
+## What changed
 
-The application uses JavaScript ES modules in the existing Vite project, browser `getUserMedia`, MediaPipe Hand Landmarker (`@mediapipe/tasks-vision` pinned to 1.1.0), and HTML5 Canvas 2D. Vite bundles the modules into a static application. There is no backend or external inference API.
+The original Vite/vanilla JavaScript application, scene, landing page, camera controls and screenshot export are retained. Iteration 2 introduces persistent hand identities, anatomical bowtie geometry, short occlusion prediction, foreground hand restoration and a finer graphite filter. No dependencies or models were added.
 
-The local model is Google's **Hand Landmarker float16, version 1** task bundle. It includes palm detection and hand landmark estimation; the output has 21 normalized landmarks per detected hand. Landmark **4** is the thumb tip and **8** is the index fingertip. The task runs in `VIDEO` mode with `numHands: 2` and detection/presence/tracking confidence thresholds of 0.55. GPU initialization is attempted first; CPU is the fallback. The official [Web guide](https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/web_js) describes the API, normalized coordinates, confidence settings, and synchronous inference behavior.
-
-The MediaPipe JavaScript library is imported lazily when a user starts the camera. Before dev/build, `prepare-assets.mjs` copies all six available JS/WASM runtime variants from the pinned installed package into `public/mediapipe/wasm/`. The library chooses the appropriate runtime. The bundled model's checksum is verified. Assets use Vite's `BASE_URL`, so model/WASM requests work with a configured base path. Camera images are never uploaded; all runtime requests are to the local application origin. Downloading npm dependencies or restoring the model requires internet only during setup.
-
-## Module boundaries
+The pipeline is now:
 
 ```text
-main.js          application state + camera + requestAnimationFrame + controls
-  handTracking.js       image → MediaPipe result
-  frameGeometry.js      result → validated, stabilized polygon + opacity
-  demo.js               animated source + simulated fingertips
-  renderer.js           source + polygon → displayed canvas
-    effects.js          reduced source pixels → pencil sketch
-style.css         layout and presentation
+unmirrored camera → MediaPipe Hand Landmarker → mirrored 21-point observations
+                   → identity association + smoothing + bounded prediction
+                   → anatomical frame → quadrilateral OR two bowtie triangles
+mirrored original → cropped graphite processing → compound polygon clip
+                  → original pixels through foreground hand mask → outline
 ```
 
-For someone new to JavaScript: `import` connects modules; classes hold persistent state; `async`/`await` sequence operations that take time; `requestAnimationFrame` schedules drawing around browser repaints. Typed arrays such as `Float32Array` are compact numeric working buffers, comparable to a fixed-size NumPy array. `getImageData()` returns flat RGBA bytes: pixel `(x, y)` starts at `(y * width + x) * 4`.
+## Modules and technologies
 
-## Camera and render loop
+`main.js` manages camera lifecycle, controls and scheduling. `handTracking.js` loads the pinned `@mediapipe/tasks-vision` 1.1.0 library and Google's Hand Landmarker float16 version 1 task bundle. It requests at most two hands in `VIDEO` mode, uses detection/presence/tracking thresholds of 0.55, tries GPU initialization, and falls back to CPU. Inference runs on an unmirrored input with a longest side of at most 640 pixels, at most 20 times per second and once per decoded video frame.
 
-The default state is the demo. Camera permission is requested only after **Start camera**. The constraints prefer 1280×720, a front camera and 30fps; audio is disabled. They are preferences rather than mandatory width/height requirements. After video playback starts, the output retains the actual camera aspect ratio, with its longest side capped at 1280 pixels.
+`handAssociation.js` associates and smooths observations; `frameGeometry.js` builds the frame and controls its lifetime. `effects.js` processes pixels; `handMask.js` approximates foreground hands; `renderer.js` composites the canvases. `demo.js` supplies an original animated illustration plus simulated 21-point hands.
 
-The camera is drawn to an offscreen source canvas using `translate(width, 0)` and `scale(-1, 1)`. Canvas mirroring ensures the preview and downloaded screenshots agree. Detection receives an **unmirrored** input, reduced to at most 640 pixels on its longest side. Landmark conversion mirrors the x coordinate once:
+All processing runs in the browser. Model/WASM files are served from the application origin, with a verified model checksum and package-matched runtime files. Camera images are not uploaded. See the [official MediaPipe Web guide](https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/web_js) and [local asset provenance](public/mediapipe/README.md).
+
+## Hand observations and identity matching
+
+MediaPipe returns 21 normalized landmarks and a handedness category with a classification score for each detected hand. The implementation uses that category score; it does **not** assume per-landmark confidence fields exist.
+
+Detection receives the original video orientation. The source preview is mirrored with a Canvas transform, and observations are converted once:
 
 ```text
-canvasX = (1 − landmarkX) × canvasWidth
-canvasY = landmarkY × canvasHeight
+x = (1 − normalizedX) × canvasWidth
+y = normalizedY × canvasHeight
 ```
 
-No CSS mirror is applied to the output. There is no crop or letterbox transform inside the canvas, so this coordinate conversion matches the displayed source exactly.
+Hand A is slot 0 and hand B is slot 1. They are persistent identities, not the hands currently on the left/right of the screen. Handedness labels remain association hints; mirroring display coordinates does not change their labels or reorder vertices.
 
-Rendering is capped at 30fps. Detection is capped at 20Hz and runs only on a new `video.currentTime`. An `undefined` result means no inference sample was taken; a result containing zero hands means detection ran and found no hands. This distinction prevents treating a throttled frame as detection failure. Geometry expires according to timestamps even if the stream stalls. Rendering/inference are skipped while the document is hidden, and stabilization resets on returning to the tab.
+On first acquisition, distinct labels with scores of at least 0.8 seed the two slots. Otherwise, acquisition uses result order. Subsequent matching considers both possible two-hand assignments, or each possible slot for a single observation. Its cost combines:
 
-An incrementing session token cancels stale asynchronous camera results. If permission resolves after Stop/Demo, every newly returned track is immediately stopped. Stop, Demo and page departure stop existing tracks, pause/detach the video and clear geometry. A stopped camera can reuse the loaded model. Leaving the page also closes the model; a model that finishes initialization after closure is released. A device `ended` event produces a recovery message.
+- Predicted wrist distance (55%).
+- Predicted palm-center distance (35%), averaging landmarks 0, 5, 9, 13 and 17.
+- Predicted thumb/index distances (5% each).
+- A bounded mismatch penalty when a reliable handedness label disagrees with an established label.
 
-## Frame geometry and gesture validation
+Distances are squared and normalized by the canvas diagonal squared. Wrist/palm motion dominates fingertip articulation. Array order can change without breaking identity. A label initially missing needs three consistent high-score observations to become established; an established label does not flip with one classification error. There is no screen-x reassignment after acquisition.
 
-Each fingertip has coordinates, a hand slot (0/1), and a finger identity (thumb/index). Exactly two detected hands are required. Normalized results are converted to mirrored canvas coordinates before geometric processing.
+Observations with implausible palm residuals or large thumb/index jumps are rejected as a whole. Limits scale with image size, hand size and elapsed time. Rejecting the whole pose prevents a false tip from refreshing the polygon's observation time while the palm keeps moving. Identities remain available for 900ms, then expire and can reacquire. No algorithm can guarantee identity through prolonged complete overlap and ambiguous/unreliable labels; that remains a practical limitation.
 
-The four points form a convex hull using the monotone-chain algorithm and signed cross products. The hull orders its boundary without crossing edges. It must contain all four points. Three-point hulls (one finger inside the other three), coincident points, and collinear shapes are rejected. This works throughout rotation; sorting hands by their screen x coordinate would swap identities when the frame rotates.
+## Motion smoothing and occlusion
 
-The validator also requires:
-
-- Finite coordinates inside the canvas and one thumb/index per hand.
-- Polygon area at least **1.2%** of the canvas area, computed by the shoelace formula.
-- Every boundary edge at least **4.5%** of the shorter canvas dimension.
-- Normalized corner cross product at least **0.12**, rejecting nearly straight, unstable corners.
-- Each hand's thumb/index pair adjacent on the hull. Pairs on diagonals are treated as crossing/overlap.
-
-The app recognizes a sufficiently open, convex four-tip window. It does not use a separate gesture classifier or confirm extended fingers from all joint angles. This is a deliberate, explainable geometric approximation; some unrelated hand poses can form a valid window too. Concave gestures are rejected rather than rendered ambiguously.
-
-## Stabilization
-
-MediaPipe's hand array can change order between detections. The stabilizer compares the summed squared fingertip distances for the two possible hand assignments, keeping thumb/index identities within each pair. It selects the closest assignment. Smoothing is applied by **finger identity**, before ordering the resulting hull. This avoids interpolating unrelated corners across ordering changes.
-
-For every coordinate:
+All 21 coordinates are smoothed, giving the frame and hand silhouette the same motion model. The exponential moving average is:
 
 ```text
-alpha = 1 − exp(−dt / 75ms)
-smoothed = previous + alpha × (measurement − previous)
+alpha = 1 − exp(−dt / smoothingTime)
+newPosition = predictedPrevious + alpha × (measurement − predictedPrevious)
 ```
 
-This time-based exponential moving average reduces jitter without tying its time constant to display frame rate. `dt` is clamped to 1–100ms to limit jumps after short gaps. The smoothed points are validated again before being accepted, because interpolation can temporarily create bad geometry too.
+The smoothing time adapts from 90ms during small motion toward 28ms during deliberate motion. Elapsed smoothing time is capped at 100ms, balancing jitter reduction with responsiveness after a gap.
 
-A sample moving any fingertip more than **23% of the canvas diagonal** is treated as an uncertain jump. The previous geometry holds and fades; if the new position persists, old identities expire and the new valid frame reacquires with a 100ms fade-in. This trades a short recovery delay for protection against large occlusion-induced jumps.
-
-When a valid frame is lost:
-
-1. Hold its last position for **220ms**, continuing to process the current image there.
-2. Fade the sketch and outline over **160ms**.
-3. Remove the frame and show gesture guidance.
-
-Loss uses elapsed time rather than a count of missed display frames. A held frame has an amber dashed outline. Reacquisition resumes automatically, without camera restart. The hold means the effect can briefly remain at a previous position while fingers are hidden; this is expected behavior.
-
-## Pencil processing and compositing
-
-Every output starts from the untouched mirrored source. When a polygon exists and the toggle is on, a reduced copy of the full source is processed at a maximum **480 pixels on the longest side**. Full-frame sampling keeps pixel registration fixed as the frame rotates/resizes, and avoids changing texture coordinates with the polygon bounding box.
-
-The processing pipeline is:
-
-1. **Grayscale:** `G = 0.299R + 0.587G + 0.114B` (the middle G on the right means the green channel).
-2. **Noise reduction:** separable radius-1 box blur.
-3. **Soft local tone:** separable radius-4 blur of the denoised grayscale.
-4. **Color dodge:** combining grayscale with its blurred inverse simplifies to `255 × gray / (blurredGray + 1)`, clamped to 255. Flat black regions have an explicit division guard. This creates a light paper base and local line detail.
-5. **Sobel contours:** convolve the denoised grayscale with the 3×3 Sobel kernels, then compute `sqrt(gx² + gy²) / 4`. A small threshold reduces noise; larger magnitudes darken the output.
-6. **Pencil shading:** retain a little luminance shading and add faint diagonal hatching with deterministic, low-amplitude grain. Fixed pixel patterns avoid randomly flickering paper texture.
-7. **Output:** write equal R/G/B values and opaque alpha into `ImageData`.
-
-The Sobel kernels are:
+Palm velocity is estimated from successive real observations, low-pass filtered and capped at one canvas diagonal per second. During a missing observation, every landmark receives the same damped translation:
 
 ```text
-gx:  -1  0  1       gy:  -1 -2 -1
-     -2  0  2             0  0  0
-     -1  0  1             1  2  1
+offset = velocity × 90ms × (1 − exp(−min(age, 150ms) / 90ms))
 ```
 
-The box blur uses running horizontal and vertical sums, making work linear in pixel count. Borders repeat the nearest pixel. Four floating-point arrays are reused between frames and reallocated only when processing dimensions change. Canvas readback still allocates `ImageData`; avoiding all allocations would require a more complex pipeline.
+Prediction stops advancing at 150ms. Finger rotations and individual joint extrapolation are deliberately avoided. The recovered measurement is blended from the predicted pose, reducing a snap back after a short occlusion.
 
-The renderer builds a polygon path, calls `save()` and `clip()`, draws the processed canvas back at the **full source coordinates**, and restores the context. A bounding box alone is not used as the mask. Fade opacity blends only inside that clipped polygon. Pixels outside the polygon remain the original source; the intentionally visible outline/markers overlay the boundary. Turning the toggle off skips processing and redraws the original source, leaving no stale effect. The outline is drawn after compositing.
+The frame uses the older of the two real observation timestamps. Prediction and repeated rendering never refresh that timestamp. A valid frame holds for 220ms from the last usable paired observation, fades over the next 180ms, then disappears. Geometry that becomes degenerate briefly also holds/fades rather than producing unstable intersections. A returning valid frame fades in over 100ms. The UI distinguishes tracking, brief prediction and holding.
 
-## Demo and capture
+Foreground silhouettes fade between 80 and 150ms of missing-hand age. They expire sooner than the frame to avoid restoring an old piece of background as though a vanished hand were still there.
 
-The original demo illustration contains drifting clouds, plant sway, steam, books and a cup. It is drawn entirely with Canvas paths, gradients and shapes. Simulated pairs of thumb/index points undergo translation, rotation and resizing, with the same identities and validation as live tracking. Demo mode needs neither permission nor the MediaPipe runtime.
+## Anatomical polygon and intersections
 
-Capture uses `canvas.toBlob('image/png')`, downloads an object URL, then revokes it. The captured canvas includes the effect and corner outline at its intrinsic resolution; surrounding interface elements are not included.
+The required cycle is always:
 
-## Verification, challenges and limitations
+```text
+A.index(8) → B.index(8) → B.thumb(4) → A.thumb(4) → A.index
+```
 
-The Node tests exercise the actual geometry and pixel algorithms. A two-minute simulated motion test checks every 50ms of geometry. Browser tests verify real Canvas clipping against source pixels, toggle restoration, animation, PNG bytes/dimensions, mobile layout, permission error handling, asynchronous cancellation, mirroring and camera-track release. The production build initializes the actual local MediaPipe runtime/model and runs inference on a generated video stream; it contains no real hands. The production demo reported 30fps after settling in headless Chrome, without concurrent screenshot/readback work; physical-camera throughput was not measured.
+The vertices are looked up by identity. They are **never sorted by screen position, centroid angle or convex hull**. Reversing the hands' horizontal positions preserves the same connections, even when winding reverses or edges cross. A convex hull is used only for the separate palm mask.
 
-**Real webcam hand detection/accuracy remains unverified.** CPU fallback, Safari/Firefox behavior, hardware removal and real-camera performance were not established by those tests. The pure pixel filter measured approximately 6.3ms per 480×300 frame in a local Node microbenchmark; that excludes Canvas readback/upload, video drawing, inference and UI, so it is not an application FPS claim.
+The geometry checks the two pairs of nonadjacent edges: AB/CD and BC/DA. For segments P→Q and R→S, define `r = Q−P`, `s = S−R`, and `q = R−P`. The scalar 2D cross product is `cross(a,b) = ax×by − ay×bx`:
 
-Important constraints are occlusion, motion blur, uneven lighting, small hands/finger frames, uncertain hand identity under overlap, and the fixed geometry thresholds. The hold/fade handles loss gracefully but cannot recover unavailable landmarks. Both inference and the filter run on the main thread. Reduced resolution and throttling control cost for this understandable MVP; an inference worker and adaptive resolution would be reasonable future improvements if physical-camera profiling shows UI stalls. No worker is necessary for demonstrating the current architecture.
+```text
+determinant = cross(r,s)
+t = cross(q,s) / determinant
+u = cross(q,r) / determinant
+intersection = P + t×r
+```
 
-Bundling all WASM variants and the model adds roughly 47MB of static assets. Only the runtime selected by MediaPipe is loaded. GPU behavior depends on the browser/device. The UI's FPS is observed render throughput, and the 30fps/20Hz limits are targets rather than guarantees.
+A proper crossing requires t and u strictly inside [0,1], allowing a small numerical tolerance. Near-parallel determinants are tested relative to segment lengths. Collinear segments use projected intervals to distinguish disjoint, touching and overlapping cases. Endpoint touches, overlapping edges, duplicate points and zero-length segments are rejected rather than divided by a tiny value.
 
-## Professor's references and attribution
+For a four-vertex cycle `[a,b,c,d]`:
 
-Both references were inspected before implementation:
+- If a→b crosses c→d at X, the lobes are `[a,X,d]` and `[b,c,X]`.
+- If b→c crosses d→a at X, the lobes are `[a,b,X]` and `[c,d,X]`.
+- Without a proper crossing, the region is the original four-sided polygon, including valid concave configurations.
 
-- [Sophia Yang — Finger Frame demo](https://sophiamyang.github.io/finger-frame-effect/), with [its source](https://github.com/sophiamyang/finger-frame-effect/blob/main/main.js). Useful techniques were landmarks 4/8, matching mirrored coordinates, identity-aware corner handling, EMA, dropout holds, jump protection, reduced pixel resolution and clipped effects. This implementation uses strict convex validation and time-based hold/fade rather than accepting crossed bowtie shapes or counting lost display frames.
-- [aithink001 — finger-frame-effect-ai repository](https://github.com/aithink001/finger-frame-effect-ai/tree/main), especially [src/app.js](https://github.com/aithink001/finger-frame-effect-ai/blob/main/src/app.js). Its area/edge validation, corner smoothing and Canvas save/clip/draw/restore pipeline informed this design. This application processes the same live image into a pencil sketch; it does not use that repository's second-video portal or external generation workflow.
+The shoelace formula computes each region's absolute area. It cannot validate a bowtie using the self-intersecting cycle alone: opposite signed lobes can cancel to zero. Bowties require each triangle to exceed 0.1% of image area, and their total to exceed 0.8%. Normal frames also require 0.8%. All tip pairs must remain at least 2% of the shorter canvas dimension apart, and nearly straight corners in a simple polygon are rejected. Coordinates must be finite and inside the canvas.
 
-The techniques above were adapted conceptually. **No application source code or media was copied from either reference.** All application modules, tests and demo artwork are original to this implementation. Standard Sobel, shoelace, convex hull and EMA algorithms are implemented directly. Third-party dependency and model provenance is recorded in [public/mediapipe/README.md](public/mediapipe/README.md).
+The renderer appends both lobe triangles to one compound Canvas path, applies `clip('evenodd')`, and draws one processed image at its source coordinates. Both lobes therefore use identical processing, opacity and alignment. There is no duplicate filtering, bounding-box-only mask, separate texture mapping or painted dividing line at the crossing. The outline follows the original anatomical path and marks the four actual fingertips.
+
+## Foreground hand mask
+
+The mask uses the existing 21 landmarks, without a segmentation model:
+
+1. Approximate the palm by the hull of landmarks 0, 1, 2, 5, 9, 13 and 17.
+2. Trace thumb 1–4, index 5–8, middle 9–12, ring 13–16 and pinky 17–20.
+3. Give each connected segment a tapered quadrilateral and round joint/tip discs. Radius depends on palm width/length, finger identity and progress toward the tip, with conservative image-relative limits.
+4. Union these regions in one nonzero path fill per hand. Skip implausibly long finger chains rather than drawing a broad strip across the background.
+5. Blur the alpha mask by 1.2 source pixels for slight feathering.
+6. Draw the original mirrored source into a restoration canvas, then apply the mask with `destination-in`.
+
+Compositing order is original video, filtered region, original hand pixels through the feathered mask, then frame outline/markers. Restoration remains inside the same polygon clip, so no pixels outside the effect are changed by feathering.
+
+This is a geometric approximation. It cannot identify the true skin boundary, clothing, shadows or which overlapping finger is closest. Foreshortening, joint errors, hand size variation, fast motion and smoothing lag can reveal sketch on a finger or restore a thin background halo. Narrow silhouettes retain a small blended border due to feathering. No forearm mask is added. Physical-camera testing is required to tune the width estimates further.
+
+## Fine graphite processing
+
+The previous 480px full-frame resize and broad blurred color-dodge contours were replaced. The filter crops the polygon's bounding region with a 3px neighborhood margin. Most frames retain native source pixels, preserving considerably more eye/hair/glasses detail. Only unusually large regions are scaled to a 1024px longest side. A bowtie uses one shared crop for both triangles.
+
+The pipeline is:
+
+1. Grayscale luminance: `0.299R + 0.587G + 0.114B`.
+2. Very light noise reduction: mix only 18% of a radius-1 cross-kernel average with 82% original luminance.
+3. Scharr gradients, normalized by 32, and their magnitude. Scharr improves directional consistency for diagonal details.
+4. Compute a local edge threshold for every 32×32 tile from mean and standard deviation of gradient magnitudes, with bounded thresholds adjusted by sensitivity.
+5. Non-maximum suppression along four quantized gradient directions. Retain a magnitude only if it is a local maximum across the edge normal. A strict comparison on one side resolves equal plateaus into one thin ridge.
+6. Convert retained magnitudes into fine graphite line darkness. Independently add mild luminance shading, faint diagonal hatching and deterministic grain.
+7. Write equal RGB values and opaque alpha, then composite inside the frame.
+
+The Scharr kernels are:
+
+```text
+gx:  -3  0  3       gy:  -3 -10 -3
+    -10  0 10             0   0  0
+     -3  0  3             3  10  3
+```
+
+The disclosure **Fine-tune the pencil** exposes three 0–100% controls: edge sensitivity (default 62%), line intensity (78%), and shading intensity (28%). Sensitivity lowers the adaptive edge threshold as it increases. The other controls independently change contour darkness and tonal shading. Zero line and shading intensity produces white paper inside the region.
+
+Six floating-point image buffers and small tile statistics arrays are reused by capacity. A changing crop does not allocate fresh full-size arrays every frame. Canvas/ImageData readback and small landmark/path objects still allocate; the implementation does not claim allocation-free rendering. A local Node measurement was about 5ms for the pure 640×360 filter, excluding video, Canvas, masks and inference. Physical-camera FPS is unverified.
+
+## Demo, controls and reliability
+
+The existing illustrated scene remains behind two procedural hands labeled A/B. They feed the same identity, smoothing, geometry, sketch and mask pipeline as the camera. Its 32-second loop shows normal geometry, one-hand orientation change into a bowtie, two visible lobes, hand interchange, reversed normal geometry and a continuous return. Phase descriptions appear in the existing canvas badge. Demo requires no camera permission, model initialization or external request.
+
+Camera start/stop, error messages, effect toggle and PNG capture remain available. Session tokens prevent a late permission result from restarting a canceled camera. Stop/Demo/page departure release tracks. Leaving also releases the model. Rendering is capped at 30fps, inference at 20Hz; actual throughput depends on the device. Hidden tabs skip rendering and return with fresh stabilization.
+
+## Verification and remaining limits
+
+The automated suite covers mirrored observations, array swaps, reliable and unlabeled hand crossings, outliers, adaptive smoothing, prediction limits, loss expiry, anatomical ordering, both crossing edge pairs, reversed winding, parallel/collinear intersections, tiny lobes, demo transitions/loop continuity, thin/weak edges, independent sketch controls, reused buffers and conservative silhouettes.
+
+Browser tests check exact outside-polygon pixels, both filtered bowtie lobes with one processing call, native region resolution, sliders, feathered hand restoration/expiry, the actual animated demo cycle, responsive layout, PNG capture, permission denial/cancellation, mirroring, restart/track release and real model inference on synthetic video in the production build.
+
+**Physical webcam hand tracking and visual occlusion quality have not been verified.** Synthetic landmarks/video establish pipeline behavior, not real-hand accuracy. CPU fallback, Safari/Firefox and hardware disconnection still need manual checks. Extremely ambiguous overlap can lose identity; entirely collapsed geometry is held/faded until a usable frame returns. Canvas processing and synchronous inference remain on the main thread; a worker or adaptive workload would be a future response to measured camera stalls, rather than an added dependency now.
+
+See [MANUAL_TESTING.md](MANUAL_TESTING.md) and [README.md](README.md) for execution instructions and final recorded test results.
+
+## References and attribution
+
+Both professor-provided projects were inspected before changing tracking/geometry:
+
+- [Sophia Yang's demo](https://sophiamyang.github.io/finger-frame-effect/) and [main.js](https://github.com/sophiamyang/finger-frame-effect/blob/main/main.js): informed mirrored tip conversion, the anatomical connection cycle, smoothing, dropout handling and clipped effects. This implementation replaces screen-position hand ordering with persistent identity matching and explicitly constructs triangle lobes.
+- [aithink001/finger-frame-effect-ai](https://github.com/aithink001/finger-frame-effect-ai/tree/main) and [src/app.js](https://github.com/aithink001/finger-frame-effect-ai/blob/main/src/app.js): informed area/edge gates, adaptive smoothing and Canvas compositing. Its angular point sorting was not adopted because it removes the required crossing.
+- [Canvas clip documentation](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/clip) and [composite operations](https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/globalCompositeOperation): describe the clipping and mask operations used here.
+
+No source code, videos or images were copied from either professor reference. Application algorithms, tests and artwork were implemented for this project. Third-party library/model provenance remains in `public/mediapipe/README.md`.

@@ -84,6 +84,7 @@ canvas { display: block; width: 100%; height: auto; max-height: 66vh; object-fit
 .adjustment-grid output { float: right; color: #929889; font-variant-numeric: tabular-nums; }
 .adjustment-grid input { width: 100%; display: block; margin: 11px 0 0; accent-color: var(--green); cursor: pointer; }
 .adjustment-grid input:focus-visible { outline: 2px solid #779b73; outline-offset: 3px; }
+.range-levels { display:flex; justify-content:space-between; margin-top:7px; color:#929889; font-size:9px; }
 @media (max-width: 520px) { .adjustment-grid { grid-template-columns: 1fr; gap: 19px; } }
 .error-message { margin: 9px 0; border: 1px solid #e1c49d; background: #fbefdb; padding: 13px 16px; color: #7d5429; font-size: 12px; border-radius: 7px; line-height: 1.65; }
 .guide { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; padding: 27px 4px 30px; }

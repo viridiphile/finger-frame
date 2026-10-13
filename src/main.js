@@ -5,7 +5,7 @@ import { HandIdentityTracker, extractHands, fingertipsFromHands } from './handAs
 import { HandTracker } from './handTracking.js';
 import { Renderer } from './renderer.js';
 import { drawDemoScene, drawDemoHands, demoHands, demoPhase } from './demo.js';
-import { SKETCH_DEFAULTS } from './effects.js';
+import { GraphiteControls } from './graphiteControls.js';
 
 const icon = (content) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${content}</svg>`;
 const cameraIcon = icon('<rect x="3" y="6" width="13" height="12" rx="3"/><path d="m16 10 5-3v10l-5-3"/>');
@@ -31,12 +31,12 @@ document.querySelector('#app').innerHTML = `
         <div class="stage-overlay" id="stage-overlay" hidden><span class="overlay-icon">${frameIcon}</span><strong>Ready when you are</strong><p>Start your camera or explore the demo scene.</p></div>
         <span class="stage-tag" id="stage-tag">DEMO / PENCIL STUDY</span>
       </div>
-      <details class="sketch-adjustments" id="sketch-adjustments">
+      <details class="sketch-adjustments" id="sketch-adjustments" open>
         <summary>Fine-tune the pencil</summary>
         <div class="adjustment-grid">
-          <label for="sensitivity">Edge sensitivity <output id="sensitivity-value" for="sensitivity">62%</output><input id="sensitivity" type="range" min="0" max="100" value="62"></label>
-          <label for="lineIntensity">Line intensity <output id="lineIntensity-value" for="lineIntensity">78%</output><input id="lineIntensity" type="range" min="0" max="100" value="78"></label>
-          <label for="shadingIntensity">Shading intensity <output id="shadingIntensity-value" for="shadingIntensity">28%</output><input id="shadingIntensity" type="range" min="0" max="100" value="28"></label>
+          <label for="sensitivity">Edge Sensitivity <output id="sensitivity-value" for="sensitivity">50%</output><input id="sensitivity" type="range" min="0" max="100" step="25" value="50"><span class="range-levels" aria-hidden="true"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></span></label>
+          <label for="lineIntensity">Line Intensity <output id="lineIntensity-value" for="lineIntensity">75%</output><input id="lineIntensity" type="range" min="0" max="100" step="25" value="75"><span class="range-levels" aria-hidden="true"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></span></label>
+          <label for="shadingIntensity">Shading Intensity <output id="shadingIntensity-value" for="shadingIntensity">50%</output><input id="shadingIntensity" type="range" min="0" max="100" step="25" value="50"><span class="range-levels" aria-hidden="true"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></span></label>
         </div>
       </details>
       <div class="telemetry"><span id="tracking-pill" class="tracking-pill" data-state="tracked"><span></span><span id="tracking-label">Simulated frame</span></span><span class="metrics"><span id="hands-count">4 simulated fingertips</span><span class="metric-divider">/</span><span id="fps">— fps</span></span></div>
@@ -65,6 +65,8 @@ const ui = {
   tracking: $('#tracking-label'), pill: $('#tracking-pill'), hands: $('#hands-count'), fps: $('#fps'),
 };
 const renderer = new Renderer(ui.canvas);
+const graphiteControls = new GraphiteControls();
+renderer.sketch.setParameters(graphiteControls.parameters);
 const stabilizer = new FrameStabilizer();
 const identities = new HandIdentityTracker();
 const tracker = new HandTracker();
@@ -315,12 +317,14 @@ function render(timestamp) {
 }
 
 ui.start.addEventListener('click', startCamera);
-for (const [name, value] of Object.entries(SKETCH_DEFAULTS)) {
+for (const [name, value] of Object.entries(graphiteControls.levels)) {
   const input = $(`#${name}`);
-  input.value = String(Math.round(value * 100));
+  input.value = String(value);
+  input.setAttribute('aria-valuetext', `${value}% control level`);
   input.addEventListener('input', () => {
     const numeric = Number(input.value);
-    renderer.sketch.setParameters({ [name]: numeric / 100 });
+    if (graphiteControls.set(name, numeric)) renderer.sketch.setParameters(graphiteControls.parameters);
+    input.setAttribute('aria-valuetext', `${numeric}% control level`);
     setText($(`#${name}-value`), `${numeric}%`);
   });
 }

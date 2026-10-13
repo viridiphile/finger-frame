@@ -1,3 +1,4 @@
+import { EffectSurface } from './effectSurface.js';
 export const SKETCH_DEFAULTS = Object.freeze({ sensitivity: 0.62, lineIntensity: 0.78, shadingIntensity: 0.28 });
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const TILE = 32;
@@ -110,13 +111,11 @@ export function pencilSketchPixels(image, buffers = createSketchBuffers(image.wi
   return image;
 }
 
-export class PencilSketch {
+export class PencilSketch extends EffectSurface {
   constructor() {
-    this.canvas = document.createElement('canvas');
-    this.context = this.canvas.getContext('2d', { willReadFrequently: true });
+    super();
     this.buffers = null;
     this.parameters = { ...SKETCH_DEFAULTS, originX: 0, originY: 0 };
-    this.bounds = { x: 0, y: 0, width: 0, height: 0 };
   }
 
   setParameters(parameters) {
@@ -126,37 +125,13 @@ export class PencilSketch {
   }
 
   process(source, polygon = null) {
-    let left = 0, top = 0, right = source.width, bottom = source.height;
-    if (polygon) {
-      // The 3-pixel border supports noise/gradient/NMS neighborhoods. Native
-      // region sampling preserves much more face detail than shrinking a whole
-      // camera frame to 480px. Both bowtie lobes share this single region.
-      left = Math.max(0, Math.floor(Math.min(...polygon.map((p) => p.x))) - 3);
-      top = Math.max(0, Math.floor(Math.min(...polygon.map((p) => p.y))) - 3);
-      right = Math.min(source.width, Math.ceil(Math.max(...polygon.map((p) => p.x))) + 3);
-      bottom = Math.min(source.height, Math.ceil(Math.max(...polygon.map((p) => p.y))) + 3);
-    }
-    this.bounds.x = left;
-    this.bounds.y = top;
-    this.bounds.width = right - left;
-    this.bounds.height = bottom - top;
-    // Only unusually large regions are scaled; ordinary finger frames retain
-    // their source resolution. Float buffers grow by capacity, not per resize.
-    const scale = Math.min(1, 1024 / Math.max(this.bounds.width, this.bounds.height));
-    const width = Math.max(1, Math.round(this.bounds.width * scale));
-    const height = Math.max(1, Math.round(this.bounds.height * scale));
-    if (this.canvas.width !== width || this.canvas.height !== height) {
-      this.canvas.width = width;
-      this.canvas.height = height;
-    }
+    const image = this.sample(source, polygon);
+    const { width, height } = image;
     if (!this.buffers || this.buffers.capacity < width * height) {
-      const capacity = Math.ceil(width * height / 65536) * 65536;
-      this.buffers = createSketchBuffers(width, height, capacity);
+      this.buffers = createSketchBuffers(width, height, Math.ceil(width * height / 65536) * 65536);
     }
-    this.parameters.originX = left * scale;
-    this.parameters.originY = top * scale;
-    this.context.drawImage(source, left, top, this.bounds.width, this.bounds.height, 0, 0, width, height);
-    const image = this.context.getImageData(0, 0, width, height);
+    this.parameters.originX = this.bounds.x * this.scale;
+    this.parameters.originY = this.bounds.y * this.scale;
     pencilSketchPixels(image, this.buffers, this.parameters);
     this.context.putImageData(image, 0, 0);
     return this.canvas;

@@ -8,13 +8,13 @@ export class EffectSurface {
     this.scale = 1;
   }
 
-  sample(source, polygon = null) {
+  sample(source, polygon = null, padding = 3) {
     let left = 0, top = 0, right = source.width, bottom = source.height;
     if (polygon) {
-      left = Math.max(0, Math.floor(Math.min(...polygon.map((p) => p.x))) - 3);
-      top = Math.max(0, Math.floor(Math.min(...polygon.map((p) => p.y))) - 3);
-      right = Math.min(source.width, Math.ceil(Math.max(...polygon.map((p) => p.x))) + 3);
-      bottom = Math.min(source.height, Math.ceil(Math.max(...polygon.map((p) => p.y))) + 3);
+      left = Math.max(0, Math.floor(Math.min(...polygon.map((p) => p.x))) - padding);
+      top = Math.max(0, Math.floor(Math.min(...polygon.map((p) => p.y))) - padding);
+      right = Math.min(source.width, Math.ceil(Math.max(...polygon.map((p) => p.x))) + padding);
+      bottom = Math.min(source.height, Math.ceil(Math.max(...polygon.map((p) => p.y))) + padding);
     }
     Object.assign(this.bounds, { x: left, y: top, width: right - left, height: bottom - top });
     if (this.bounds.width <= 0 || this.bounds.height <= 0) throw new RangeError('Empty effect region.');

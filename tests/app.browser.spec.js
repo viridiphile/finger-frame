@@ -179,6 +179,7 @@ test('the live demo shows both bowtie lobes, hand interchange, and the normal re
   await page.goto('/');
   await expect(page.locator('#stage-tag')).toContainText('BOWTIE · TWO FILTERED LOBES', { timeout:15000 });
   await expect(page.locator('#tracking-label')).toHaveText('Simulated bowtie · both lobes');
+  await expect(page.locator('#geometry')).toHaveText('Bowtie');
   await page.screenshot({ path:'test-results/demo-bowtie.png', fullPage:true });
   await page.locator('[data-effect="solarize"]').click();
   await expect(page.locator('#stage-tag')).toContainText('SOLARIZE');
@@ -269,6 +270,20 @@ test('production build runs the real local model on synthetic video, mirrors, an
   await expect(page.locator('#tracking-label')).toHaveText('Show both hands', { timeout: 60_000 });
   await expect(page.locator('#error-message')).toBeHidden();
   await expect(page.locator('#hands-count')).toHaveText('0 / 2 hands');
+  await expect(page.locator('#geometry')).toHaveText('Lost');
+  for (const type of ['solarize', 'motion-glitch', 'graphite']) {
+    await page.locator(`[data-effect="${type}"]`).click();
+  }
+  expect(await page.evaluate(() => window.testStreams.length)).toBe(1);
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('#capture-btn').click();
+  await expect(page.locator('#countdown-number')).toHaveText('3');
+  const download = await downloadPromise;
+  const chunks = [];
+  for await (const chunk of await download.createReadStream()) chunks.push(chunk);
+  const png = Buffer.concat(chunks);
+  expect(png.readUInt32BE(16)).toBe(640);
+  expect(png.readUInt32BE(20)).toBe(360);
   const pixels = await page.locator('#output-canvas').evaluate((canvas) => {
     const ctx = canvas.getContext('2d');
     return { width: canvas.width, height: canvas.height, left: [...ctx.getImageData(10, 180, 1, 1).data], right: [...ctx.getImageData(630, 180, 1, 1).data] };
@@ -277,7 +292,13 @@ test('production build runs the real local model on synthetic video, mirrors, an
   expect(pixels.height).toBe(360);
   expect(pixels.left[2]).toBeGreaterThan(pixels.left[0]);
   expect(pixels.right[0]).toBeGreaterThan(pixels.right[2]);
+  let canceledDownloads = 0;
+  page.on('download', () => canceledDownloads++);
+  await page.locator('#capture-btn').click();
   await page.locator('#stop-btn').click();
+  await page.waitForTimeout(3200);
+  expect(canceledDownloads).toBe(0);
+  await expect(page.locator('#capture-countdown')).toBeHidden();
   await expect(page.locator('#mode-label')).toHaveText('Camera stopped');
   expect(await page.evaluate(() => window.testStreams[0].getTracks()[0].readyState)).toBe('ended');
   await page.locator('#start-btn').click();

@@ -11,6 +11,7 @@ import { EFFECT_LABELS } from './effectPipeline.js';
 
 import { workspaceView } from './workspaceView.js';
 import { initializeWorkspaceUI } from './workspaceUI.js';
+import { CaptureCountdown } from './captureCountdown.js';
 
 document.querySelector('#app').innerHTML = workspaceView;
 const workspaceUI = initializeWorkspaceUI();
@@ -45,18 +46,50 @@ let trackingState = '';
 let demoStartedAt = 0;
 let demoTime = 0;
 
+const capture = new CaptureCountdown({
+  captureFrame: () => new Promise((resolve) => ui.canvas.toBlob(resolve, 'image/png')),
+  saveFrame: (blob) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `fingerframe-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+    try {
+      document.body.append(link);
+      link.click();
+      setMessage('PNG download started, including the frame outline.');
+    } finally {
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  },
+  onChange: refreshCapture,
+  onError: () => showError('Could not capture this frame. Try again after the preview appears.', 'capture'),
+});
+
+function refreshCapture() {
+  ui.capture.disabled = mode === 'idle' || capture.active;
+  setText(ui.capture.querySelector('span'), capture.active
+    ? (capture.remaining ? `Capture in ${capture.remaining}` : 'Saving…') : 'Capture');
+  $('#capture-countdown').hidden = !capture.active || capture.remaining === 0;
+  setText($('#countdown-number'), capture.remaining ? String(capture.remaining) : '');
+}
+
 function setText(element, value) {
   if (element.textContent !== value) element.textContent = value;
 }
 function setMessage(message) { setText(ui.message, message); }
 function clearError() { ui.error.hidden = true; ui.error.textContent = ''; }
-function showError(message) { ui.error.textContent = message; ui.error.hidden = false; }
+function showError(message, kind = 'general') {
+  ui.error.textContent = message;
+  ui.error.dataset.kind = kind;
+  ui.error.hidden = false;
+}
 
 function refreshControls() {
   ui.start.disabled = starting || mode === 'camera';
   ui.start.querySelector('span').textContent = starting ? 'Starting…' : 'Start camera';
   ui.stop.disabled = !starting && mode === 'idle';
-  ui.capture.disabled = mode === 'idle';
+  refreshCapture();
   ui.demo.setAttribute('aria-pressed', String(mode === 'demo' && !starting));
   ui.overlay.hidden = mode !== 'idle';
   ui.overlay.querySelector('strong').textContent = starting ? 'Waiting for your camera' : 'Ready when you are';
@@ -71,6 +104,7 @@ function refreshControls() {
 }
 
 function resetFrame() {
+  capture.cancel();
   stabilizer.reset();
   identities.reset();
   frameMotion.reset();
@@ -86,6 +120,7 @@ function resetFrame() {
 }
 
 function releaseCamera() {
+  capture.cancel();
   // Incrementing the token also cancels a pending permission/play operation.
   sessionId++;
   starting = false;
@@ -315,21 +350,9 @@ ui.effect.addEventListener('change', () => {
   setMessage(ui.effect.checked ? `${EFFECT_LABELS[renderer.effects.selected]} on. Only the area inside the frame is processed.` : 'Effect off. The frame remains visible over the original image.');
 });
 ui.capture.addEventListener('click', () => {
-  ui.canvas.toBlob((blob) => {
-    if (!blob) {
-      showError('Could not capture this frame. Try again after the preview appears.');
-      return;
-    }
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `fingerframe-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setMessage('PNG download started, including the frame outline.');
-  }, 'image/png');
+  if (mode === 'idle' || capture.active) return;
+  if (ui.error.dataset.kind === 'capture') clearError();
+  if (capture.start()) setMessage('Hold your frame. Capture in three seconds…');
 });
 
 window.addEventListener('pagehide', () => {
@@ -337,7 +360,10 @@ window.addEventListener('pagehide', () => {
   tracker.close();
 });
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) {
+  if (document.hidden) {
+    if (capture.active) setMessage('Capture canceled while the preview is hidden. Press Capture to try again.');
+    capture.cancel();
+  } else {
     resetFrame();
     // Keep a tab return continuous rather than advancing through unseen phases.
     if (mode === 'demo') demoStartedAt = performance.now() - demoTime;

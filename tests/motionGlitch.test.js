@@ -33,3 +33,11 @@ test('positive/negative lobe processing is deterministic and distinct',()=>{
   motionGlitchPixels(source,repeat,{...options,sign:1});
   assert.deepEqual(a.data,repeat.data); assert.notDeepEqual(a.data,b.data);
 });
+
+test('quiet subpixel separation retains a small chromatic contribution',()=>{
+  const source=fixture(),result=output();
+  motionGlitchPixels(source,result,{motion:{intensity:0,angle:0}});
+  const p=(10*64+20)*4;
+  assert.equal(result.data[p],source.data[p]+1);
+  assert.equal(result.data[p+2],source.data[p+2]-1);
+});

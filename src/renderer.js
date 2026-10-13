@@ -1,4 +1,4 @@
-import { PencilSketch } from './effects.js';
+import { EffectPipeline } from './effectPipeline.js';
 import { ForegroundHandMask } from './handMask.js';
 
 export function polygonPath(context, points) {
@@ -18,7 +18,8 @@ export class Renderer {
     this.context = canvas.getContext('2d');
     this.source = document.createElement('canvas');
     this.sourceContext = this.source.getContext('2d');
-    this.sketch = new PencilSketch();
+    this.effects = new EffectPipeline();
+    this.sketch = this.effects.graphite;
     this.handMask = new ForegroundHandMask();
     this.resize(960, 600);
   }
@@ -26,6 +27,7 @@ export class Renderer {
   resize(width, height) {
     this.canvas.width = this.source.width = width;
     this.canvas.height = this.source.height = height;
+    this.effects.resetTemporal();
   }
 
   drawCamera(video) {
@@ -37,23 +39,28 @@ export class Renderer {
     ctx.restore();
   }
 
-  composite(frame, effectEnabled, showOutline = true, hands = []) {
+  composite(frame, effectEnabled, showOutline = true, hands = [], effectContext = {}) {
     const ctx = this.context;
     const { width, height } = this.canvas;
     // Always redraw the original source: disabling the effect leaves no residue.
     ctx.drawImage(this.source, 0, 0, width, height);
     if (!frame.polygon || frame.opacity <= 0) return;
     if (effectEnabled) {
-      const sketch = this.sketch.process(this.source, frame.polygon);
+      const layers = this.effects.process(this.source, { ...effectContext, frame });
+      for (const layer of layers) {
+        ctx.save();
+        ctx.beginPath();
+        for (const region of layer.regions) appendPolygonPath(ctx, region);
+        ctx.clip('evenodd');
+        ctx.globalAlpha = frame.opacity;
+        const bounds = layer.bounds;
+        ctx.drawImage(layer.canvas, bounds.x, bounds.y, bounds.width, bounds.height);
+        ctx.restore();
+      }
       ctx.save();
       ctx.beginPath();
       for (const region of frame.regions ?? [frame.polygon]) appendPolygonPath(ctx, region);
-      // One compound clip and one image draw for both lobes: same pixels,
-      // same alpha, and no repeated filter work at the shared crossing.
       ctx.clip('evenodd');
-      ctx.globalAlpha = frame.opacity;
-      const bounds = this.sketch.bounds;
-      ctx.drawImage(sketch, bounds.x, bounds.y, bounds.width, bounds.height);
       // Restore actual source pixels, not a painted skin color. The current
       // polygon clip also confines feathering so outside pixels stay exact.
       ctx.globalAlpha = 1;

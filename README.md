@@ -50,11 +50,44 @@ npm run preview
 
 - Node checks: **57 tests passed**, including all **125** Graphite combinations, motion features, palette mapping, geometry stability and countdown/cancellation/encoding recovery.
 - Build: **successful**, with local model/WASM assets packaged in `dist/`.
-- Chrome checks: **22 tests passed**, including all modes, discrete independent controls/settings retention, PNG output, anatomical lobe treatment, masking, native crop/buffer reuse, responsive layout, the demo cycle, permission failures/cancellation, mirroring and model inference on synthetic video. New workspace checks cover four desktop and four small viewports, anchored popover dismissal, native modal focus/inertness, all five accordions, countdown timing, exact final-canvas PNG bytes, cancellation during encoding, capture recovery and webcam-mode capture. Three scene checks add opaque/scaled artwork and cache reuse, all effects through normal/bowtie/interchange/reversed poses, and production demo performance without a webcam or external assets.
+- Previous full Chrome checks: **22 tests passed**, including all modes, discrete independent controls/settings retention, PNG output, anatomical lobe treatment, masking, native crop/buffer reuse, responsive layout, the demo cycle, permission failures/cancellation, mirroring and model inference on synthetic video. New workspace checks cover four desktop and four small viewports, anchored popover dismissal, native modal focus/inertness, all five accordions, countdown timing, exact final-canvas PNG bytes, cancellation during encoding, capture recovery and webcam-mode capture. Three scene checks add opaque/scaled artwork and cache reuse, all effects through normal/bowtie/interchange/reversed poses, and production demo performance without a webcam or external assets. For this deployment change, one focused Pages-path production check passed: prefixed JavaScript/CSS/favicon/model/WASM requests, all modes, retained settings, PNG export, real model inference on synthetic video, stream cleanup and permission-denial recovery. The full Chrome suite was not rerun to completion for this deployment task.
 
 Browser checks build first and start/stop their own dev and production servers on ports **4173/4174**; keep both free. On this Mac they use installed Google Chrome. Elsewhere run `npx playwright install chromium` first, or set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`. Test captures are in ignored `test-results/`.
 
 `npm run preview` serves the current production build. Open its printed Local URL; rebuild after source changes. The personalized production demo reported **30, 30, 30fps** in each of Graphite, Solarize and Motion Glitch after settling, matching the earlier 30fps demo observation. These are headless demo measurements rather than physical-camera or cross-browser benchmarks.
+
+## GitHub Pages deployment
+
+**Expected project URL:** [https://viridiphile.github.io/finger-frame/](https://viridiphile.github.io/finger-frame/). This is the intended URL, not confirmation of a live deployment. The repository is `viridiphile/finger-frame`; its advertised default branch is `main`.
+
+`vite.config.js` uses `/` for `npm run dev` and `/finger-frame/` for production builds and `npm run preview`. Vite rewrites the JavaScript, CSS and favicon paths. The existing hand tracker uses `import.meta.env.BASE_URL`, so its bundled model and WASM files load from `/finger-frame/mediapipe/` without tracking-code changes. The illustrated scene is code-drawn and uses no image/video downloads.
+
+To validate the same subpath locally:
+
+```sh
+npm ci
+npm test
+npm run build
+npm run preview
+```
+
+Open the preview server's printed URL ending in **`/finger-frame/`**, normally `http://localhost:4173/finger-frame/`. Local development still uses `npm run dev` at the origin root. To run the dedicated production-path browser check, keep ports 4173/4174 free and run `npm run test:browser -- tests/pages.browser.spec.js`; the full suite also includes it. That check uses synthetic camera input with the real local tracker; it does not verify physical-camera behavior or live GitHub HTTPS hosting.
+
+### One-time GitHub setup (repository owner)
+
+1. Open [repository Settings → Pages](https://github.com/viridiphile/finger-frame/settings/pages). Under **Build and deployment → Source**, select **GitHub Actions**. This is an Actions artifact deployment; no `gh-pages` branch or `docs` directory is needed.
+2. Ensure GitHub Actions is enabled in **Settings → Actions → General** and that the official `actions/*` used by this workflow are allowed. If the `github-pages` environment has deployment branch restrictions, allow `main`; complete any required environment review in the Actions UI.
+3. After reviewing the local changes, commit and push them to `main` yourself. Every subsequent push to `main` triggers `.github/workflows/deploy.yml`. To deploy manually, choose **Actions → Deploy FingerFrame to GitHub Pages → Run workflow**, selecting **main**. Manual runs on other branches are skipped.
+4. Wait for both **build** and **deploy** to succeed. Use the deployment URL shown by the workflow/environment, then confirm the public URL opens on another computer. GitHub's standard `github.io` site uses HTTPS; keep **Enforce HTTPS** enabled where that setting is available.
+5. On the live site, test demo/effects/settings, then **Start camera**, allow browser/OS camera permission, check tracking, Stop/Demo cleanup and Capture. In the browser Network panel, confirm the model, WASM and built assets return successfully under `/finger-frame/`. Demo works without camera permission; localhost and HTTPS provide the secure context required by the camera.
+
+The workflow uses Node.js 24, `npm ci`, unit tests and `npm run build`, whose prebuild step verifies the tracked model checksum and copies matching WASM from the locked dependency. It uploads only `dist` and deploys it through the official Pages actions, pinned to commit SHAs. Builds have read-only repository permissions; the deployment job gets `pages: write` and `id-token: write` and reports its URL in the `github-pages` environment. No personal access token or additional repository secret is required.
+
+For free Pages hosting, the repository must be public unless your existing GitHub plan already supports Pages for private repositories. If Pages is unavailable for a private repository on GitHub Free, repository visibility needs a separate owner decision; this change does not change visibility or configure a paid host. GitHub account/Pages settings and the actual deployment have **not** been changed or executed locally. No push or merge was performed for this deployment task.
+
+If the repository name/default branch changes, update the production base and workflow branch filter/guard together. A custom domain or a user site at the origin root would need a `/` production base instead.
+
+References: [Vite's Pages deployment guide](https://vite.dev/guide/static-deploy.html#github-pages), [GitHub's Pages workflow guide](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages), and [Pages availability](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages).
 
 ## Verification limits
 
@@ -96,4 +129,4 @@ The normal desktop workspace fits 1280×720, 1366×768, 1440×900 and 1920×1080
 | `tests/graphiteControls.test.js`, `tests/solarize.test.js`, `tests/frameMotion.test.js`, `tests/motionGlitch.test.js`, `tests/v3.browser.spec.js` (new) | Mapping, 125 combinations, palette identity, gesture response and compositing |
 | `README.md`, `TECHNICAL_EXPLANATION.md`, `MANUAL_TESTING.md`, `V3_SPECIFICATION.md` | Current V3 algorithms, corrected requirements and testing guidance |
 
-`node_modules/`, `dist/`, generated WASM and test output remain excluded from Git. The corrected specification incorporates the user's three-slider amendment throughout Sections 3, 7, 8, 9 and 11 and related references. The compact workspace was reviewed/merged separately. This scene redesign belongs to `feature/personalized-demo-scene`; merge review remains with the user. No merge or release tag is part of this submission.
+`node_modules/`, `dist/`, generated WASM and test output remain excluded from Git. The corrected specification incorporates the user's three-slider amendment throughout Sections 3, 7, 8, 9 and 11 and related references. The compact workspace was reviewed/merged separately. The scene redesign was subsequently merged into `main`. The GitHub Pages configuration is prepared locally for review; no push, merge or release tag is part of this deployment task.
